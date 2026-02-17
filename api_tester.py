@@ -1077,9 +1077,14 @@ class AIAgent:
                     console.print("[red]❌ No model selected. Use /model[/red]")
                     continue
 
-                if cfg.get("supports_tools"):
+                if cfg.get("tool_mode") == "text":
+                    # Text-based tool parsing (works with any provider)
+                    response = self.send_simple_message(user_input)
+                elif cfg.get("supports_tools"):
+                    # Native tool calling API
                     response = self.call_ai_with_tools(user_input)
                 else:
+                    # No tool support - chat only
                     response = self.send_simple_message(user_input)
 
                 if response:
