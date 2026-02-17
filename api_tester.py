@@ -2,6 +2,7 @@
 Universal API Tester with AI Agent Capabilities
 Fixed: Tool message formatting for OpenAI/Groq
 """
+
 import time
 import threading
 import json
@@ -16,6 +17,7 @@ from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.table import Table
 from rich import box
+from rich.markdown import Markdown
 
 from config import ensure_directories
 from agent_tools import execute_tool, TOOLS_DEFINITIONS
@@ -26,6 +28,7 @@ ensure_directories()
 
 class Spinner:
     """Thread-safe spinner"""
+
     def __init__(self, message: str = "Processing"):
         self.message = message
         self._running = False
@@ -39,7 +42,9 @@ class Spinner:
             with self._lock:
                 if not self._running:
                     break
-            console.print(f"[dim]{frames[i % len(frames)]} {self.message}...[/dim]", end="\r")
+            console.print(
+                f"[dim]{frames[i % len(frames)]} {self.message}...[/dim]", end="\r"
+            )
             time.sleep(0.08)
             i += 1
         console.print(" " * 100, end="\r")
@@ -62,9 +67,12 @@ class Spinner:
 
 class ConversationManager:
     """Conversation history with context memory"""
+
     def __init__(self, max_messages: int = 20):
         self.messages: deque = deque(maxlen=max_messages)
-        self._pending_context: List[Dict] = []  # Context messages queued during tool cycles
+        self._pending_context: List[
+            Dict
+        ] = []  # Context messages queued during tool cycles
         self.system_prompt = """You are a helpful AI assistant with access to file system tools.
 
 You can create, read, update, and delete files, list directories, and execute safe commands.
@@ -81,13 +89,16 @@ When you read files, their content becomes part of your context - reference it i
 
     def inject_file_context(self, file_path: str, content: str):
         """Queue file context to be added after the tool cycle completes.
-        
+
         CRITICAL: We must NOT insert system messages between an assistant
         message with tool_calls and the corresponding tool result messages.
         The OpenAI/Groq API requires tool results to immediately follow
         the assistant tool_calls message.
         """
-        context_msg = {"role": "system", "content": f"[File Context: {file_path}]\n{content}"}
+        context_msg = {
+            "role": "system",
+            "content": f"[File Context: {file_path}]\n{content}",
+        }
         self._pending_context.append(context_msg)
 
     def flush_pending_context(self):
@@ -99,7 +110,7 @@ When you read files, their content becomes part of your context - reference it i
 
     def get_messages(self) -> List[Dict]:
         """Build properly formatted message list for the API.
-        
+
         Ensures:
         - System prompt is always first
         - tool messages always have tool_call_id
@@ -145,7 +156,11 @@ class AIAgent:
                 "auth_prefix": None,
                 "supports_tools": True,
                 "style": "anthropic",
-                "models": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
+                "models": [
+                    "claude-3-5-sonnet-20241022",
+                    "claude-3-5-haiku-20241022",
+                    "claude-3-opus-20240229",
+                ],
             },
             "groq": {
                 "label": "Groq",
@@ -223,11 +238,12 @@ class AIAgent:
     def select_provider(self) -> Optional[str]:
         choices = []
         for key, cfg in self.services.items():
-            tools_indicator = "🔧 Tools" if cfg.get("supports_tools") else "💬 Chat Only"
+            tools_indicator = (
+                "🔧 Tools" if cfg.get("supports_tools") else "💬 Chat Only"
+            )
             choices.append(
                 questionary.Choice(
-                    title=f"{cfg['label']:<20} [{tools_indicator}]",
-                    value=key
+                    title=f"{cfg['label']:<20} [{tools_indicator}]", value=key
                 )
             )
 
@@ -243,14 +259,16 @@ class AIAgent:
 
     def ask_api_key(self, provider: str) -> Optional[str]:
         config = self.services[provider]
-        
+
         # Check environment variable first
         env_var = f"{provider.upper()}_API_KEY"
         if os.environ.get(env_var):
             return os.environ.get(env_var)
-            
+
         try:
-            key = Prompt.ask(f"[bold]Enter API key for {config['label']}[/bold]").strip()
+            key = Prompt.ask(
+                f"[bold]Enter API key for {config['label']}[/bold]"
+            ).strip()
             return key if key else None
         except (KeyboardInterrupt, EOFError):
             return None
@@ -290,21 +308,29 @@ class AIAgent:
                 if service == "groq":
                     # Filter for chat models, excluding guard models
                     chat_models = [
-                        m for m in models 
-                        if any(x in m.lower() for x in ["llama", "mixtral", "gemma", "deepseek"])
+                        m
+                        for m in models
+                        if any(
+                            x in m.lower()
+                            for x in ["llama", "mixtral", "gemma", "deepseek"]
+                        )
                         and "guard" not in m.lower()
                     ]
-                    
+
                     if chat_models:
                         # Prioritize higher capability models
                         def model_priority(name):
                             name_lower = name.lower()
-                            if "llama-3.3-70b" in name_lower: return 0
-                            if "llama-3.1-70b" in name_lower: return 1
-                            if "mixtral-8x7b" in name_lower: return 2
-                            if "llama-3.1-8b" in name_lower: return 3
+                            if "llama-3.3-70b" in name_lower:
+                                return 0
+                            if "llama-3.1-70b" in name_lower:
+                                return 1
+                            if "mixtral-8x7b" in name_lower:
+                                return 2
+                            if "llama-3.1-8b" in name_lower:
+                                return 3
                             return 10
-                            
+
                         chat_models.sort(key=model_priority)
                         models = chat_models
 
@@ -344,6 +370,8 @@ class AIAgent:
 
     def send_simple_message(self, user_message: str) -> Optional[str]:
         """Send message without tool support"""
+        if not self.service:
+            return "❌ No provider selected"
         config = self.services[self.service]
         url = config["base_url"] + config["chat_endpoint"]
         headers = self.get_headers(self.service)
@@ -359,7 +387,11 @@ class AIAgent:
                 payload = {
                     "model": self.current_model,
                     "max_tokens": 4096,
-                    "messages": [m for m in self.conversation.get_messages() if m["role"] != "system"],
+                    "messages": [
+                        m
+                        for m in self.conversation.get_messages()
+                        if m["role"] != "system"
+                    ],
                     "system": self.conversation.system_prompt,
                 }
             elif self.service == "cohere":
@@ -388,7 +420,7 @@ class AIAgent:
                     content = data["choices"][0]["message"]["content"]
 
                 self.conversation.add_message("assistant", content)
-                return f"{content}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed*1000)}ms)[/dim]"
+                return f"{content}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed * 1000)}ms)[/dim]"
             else:
                 try:
                     err = resp.json().get("error", {}).get("message", resp.text)
@@ -405,7 +437,7 @@ class AIAgent:
 
     def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
         """Sanitize messages to ensure proper format for OpenAI-style APIs.
-        
+
         Rules enforced:
         1. Every 'tool' role message MUST have a 'tool_call_id' field
         2. Tool messages must follow an assistant message that has 'tool_calls'
@@ -417,12 +449,12 @@ class AIAgent:
         while i < len(messages):
             msg = messages[i]
             role = msg.get("role")
-            
+
             if role == "assistant" and msg.get("tool_calls"):
                 # Add the assistant message with tool_calls
                 sanitized.append(msg)
                 i += 1
-                
+
                 # Collect all subsequent tool messages first, defer system messages
                 deferred_system = []
                 while i < len(messages):
@@ -447,11 +479,13 @@ class AIAgent:
             else:
                 sanitized.append(msg)
                 i += 1
-        
+
         return sanitized
 
     def call_ai_with_tools(self, user_message: str) -> Optional[str]:
         """Call AI with tool support - handles tool message formatting correctly."""
+        if not self.service:
+            return "❌ No provider selected"
         config = self.services[self.service]
         url = config["base_url"] + config["chat_endpoint"]
         headers = self.get_headers(self.service)
@@ -471,7 +505,11 @@ class AIAgent:
 
                 if self.service == "anthropic":
                     # Anthropic: filter system messages out, pass as top-level param
-                    api_messages = [m for m in self.conversation.get_messages() if m["role"] != "system"]
+                    api_messages = [
+                        m
+                        for m in self.conversation.get_messages()
+                        if m["role"] != "system"
+                    ]
                     payload = {
                         "model": self.current_model,
                         "max_tokens": 4096,
@@ -481,7 +519,9 @@ class AIAgent:
                     }
                 else:
                     # OpenAI-style: sanitize messages to fix tool chain ordering
-                    api_messages = self._sanitize_messages_for_api(self.conversation.get_messages())
+                    api_messages = self._sanitize_messages_for_api(
+                        self.conversation.get_messages()
+                    )
                     payload = {
                         "model": self.current_model,
                         "messages": api_messages,
@@ -498,23 +538,33 @@ class AIAgent:
                         err = err_data.get("error", {}).get("message", resp.text)
                     except Exception:
                         err = resp.text[:300]
-                    
+
                     # If the error is about tool calling not being supported by the model,
                     # fall back to simple message mode
                     err_lower = str(err).lower()
-                    if resp.status_code == 400 and ("tool" in err_lower and ("not supported" in err_lower or "not available" in err_lower)):
+                    if resp.status_code == 400 and (
+                        "tool" in err_lower
+                        and (
+                            "not supported" in err_lower or "not available" in err_lower
+                        )
+                    ):
                         # Remove the user message we just added (it will be re-added by send_simple_message)
-                        if self.conversation.messages and self.conversation.messages[-1].get("role") == "user":
+                        if (
+                            self.conversation.messages
+                            and self.conversation.messages[-1].get("role") == "user"
+                        ):
                             self.conversation.messages.pop()
                         return self.send_simple_message(user_message)
-                    
+
                     return f"❌ Error ({resp.status_code}): {err}"
 
                 data = resp.json()
 
                 if self.service == "anthropic":
                     content_blocks = data.get("content", [])
-                    tool_uses = [b for b in content_blocks if b.get("type") == "tool_use"]
+                    tool_uses = [
+                        b for b in content_blocks if b.get("type") == "tool_use"
+                    ]
 
                     if tool_uses:
                         spinner.stop()
@@ -522,7 +572,9 @@ class AIAgent:
                             tool_name = tool_use["name"]
                             tool_args = tool_use["input"]
 
-                            console.print(f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]")
+                            console.print(
+                                f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]"
+                            )
                             result = execute_tool(tool_name, tool_args)
 
                             if result.get("success"):
@@ -531,27 +583,36 @@ class AIAgent:
                                     # self.conversation.inject_file_context(result["path"], result["content"])
                                     pass
                             else:
-                                console.print(f"[red]✗ {tool_name}: {result.get('error')}[/red]")
+                                console.print(
+                                    f"[red]✗ {tool_name}: {result.get('error')}[/red]"
+                                )
 
-                            self.conversation.add_message("user", json.dumps({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use["id"],
-                                "content": json.dumps(result)
-                            }))
+                            self.conversation.add_message(
+                                "user",
+                                json.dumps(
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": tool_use["id"],
+                                        "content": json.dumps(result),
+                                    }
+                                ),
+                            )
 
                         # Flush any pending file context AFTER all tool results are added
                         self.conversation.flush_pending_context()
                         spinner.start()
                         continue
 
-                    text_blocks = [b["text"] for b in content_blocks if b.get("type") == "text"]
+                    text_blocks = [
+                        b["text"] for b in content_blocks if b.get("type") == "text"
+                    ]
                     if text_blocks:
                         response_text = "\n".join(text_blocks)
                         self.conversation.flush_pending_context()
                         self.conversation.add_message("assistant", response_text)
                         spinner.stop()
                         elapsed = time.perf_counter() - start
-                        return f"{response_text}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed*1000)}ms)[/dim]"
+                        return f"{response_text}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed * 1000)}ms)[/dim]"
 
                 else:  # OpenAI-style (Groq, OpenAI, OpenRouter)
                     choice = data["choices"][0]
@@ -566,7 +627,7 @@ class AIAgent:
                         self.conversation.add_message(
                             "assistant",
                             assistant_content,
-                            tool_calls=message["tool_calls"]
+                            tool_calls=message["tool_calls"],
                         )
 
                         # Execute ALL tools and add ALL tool responses BEFORE doing anything else
@@ -574,24 +635,28 @@ class AIAgent:
                             func = tool_call.get("function", {})
                             tool_name = func.get("name", "unknown")
                             tool_call_id = tool_call.get("id", "")
-                            
+
                             try:
                                 tool_args = json.loads(func.get("arguments", "{}"))
                             except json.JSONDecodeError:
                                 tool_args = {}
 
-                            console.print(f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]")
+                            console.print(
+                                f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]"
+                            )
                             result = execute_tool(tool_name, tool_args)
 
                             if result.get("success"):
                                 console.print(f"[green]✓ {tool_name}[/green]")
                                 # For read_file, we need to make sure the model actually Sees the content.
-                                # Instead of system messages (which can break tool chains), we'll rely on the 
+                                # Instead of system messages (which can break tool chains), we'll rely on the
                                 # tool output itself being part of the conversation history.
                                 # The 'content' field in the tool output JSON is what the model sees.
                                 pass
                             else:
-                                console.print(f"[red]✗ {tool_name}: {result.get('error')}[/red]")
+                                console.print(
+                                    f"[red]✗ {tool_name}: {result.get('error')}[/red]"
+                                )
 
                             # Add tool result message with REQUIRED tool_call_id
                             # Add tool result message with REQUIRED tool_call_id
@@ -600,7 +665,7 @@ class AIAgent:
                                 "tool",
                                 content_str,
                                 tool_call_id=tool_call_id,
-                                name=tool_name
+                                name=tool_name,
                             )
 
                         # NOW flush pending file context (after ALL tool results are in place)
@@ -616,7 +681,7 @@ class AIAgent:
                         self.conversation.add_message("assistant", response_text)
                         spinner.stop()
                         elapsed = time.perf_counter() - start
-                        return f"{response_text}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed*1000)}ms)[/dim]"
+                        return f"{response_text}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed * 1000)}ms)[/dim]"
 
                 spinner.stop()
                 return str(data)
@@ -630,13 +695,10 @@ class AIAgent:
         except json.JSONDecodeError as e:
             spinner.stop()
             return f"❌ Invalid JSON in tool arguments: {e}"
-        except json.JSONDecodeError as e:
-            spinner.stop()
-            return f"❌ Invalid JSON in tool arguments: {e}"
         except requests.exceptions.ConnectionError as e:
             spinner.stop()
             if "10013" in str(e):
-                 return f"❌ Network access denied (WinError 10013). Check your firewall, antivirus, or VPN settings."
+                return f"❌ Network access denied (WinError 10013). Check your firewall, antivirus, or VPN settings."
             return f"❌ Connection error: {e}"
         except Exception as e:
             spinner.stop()
@@ -650,7 +712,9 @@ class AIAgent:
         if self.service:
             cfg = self.services[self.service]
             table.add_row("Provider", cfg["label"])
-            table.add_row("Tools Support", "✅ Yes" if cfg.get("supports_tools") else "❌ No")
+            table.add_row(
+                "Tools Support", "✅ Yes" if cfg.get("supports_tools") else "❌ No"
+            )
         if self.current_model:
             table.add_row("Model", self.current_model)
         if self.api_key:
@@ -663,13 +727,15 @@ class AIAgent:
 
     def setup(self) -> bool:
         console.clear()
-        console.print(Panel.fit(
-            "[bold cyan]🤖 AI Agent with Secure CRUD Operations[/bold cyan]\n"
-            "[dim]File operations • Command execution • Context memory[/dim]\n"
-            "[yellow]Commands: /config, /provider, /key, /model, /clear, exit[/yellow]",
-            border_style="cyan",
-            box=box.DOUBLE,
-        ))
+        console.print(
+            Panel.fit(
+                "[bold cyan]🤖 AI Agent with Secure CRUD Operations[/bold cyan]\n"
+                "[dim]File operations • Command execution • Context memory[/dim]\n"
+                "[yellow]Commands: /config, /provider, /key, /model, /clear, exit[/yellow]",
+                border_style="cyan",
+                box=box.DOUBLE,
+            )
+        )
 
         provider = self.select_provider()
         if not provider:
@@ -677,8 +743,14 @@ class AIAgent:
 
         self.service = provider
         cfg = self.services[provider]
-        tools_status = "with tool support" if cfg.get("supports_tools") else "(chat only, no tools)"
-        console.print(f"[green]✓[/green] Provider: [bold]{cfg['label']}[/bold] [dim]{tools_status}[/dim]")
+        tools_status = (
+            "with tool support"
+            if cfg.get("supports_tools")
+            else "(chat only, no tools)"
+        )
+        console.print(
+            f"[green]✓[/green] Provider: [bold]{cfg['label']}[/bold] [dim]{tools_status}[/dim]"
+        )
 
         api_key = self.ask_api_key(provider)
         if not api_key:
@@ -692,7 +764,9 @@ class AIAgent:
 
         if not models:
             console.print("[yellow]⚠ Could not fetch models[/yellow]")
-            manual = Prompt.ask("[bold]Enter model name manually[/bold]", default="").strip()
+            manual = Prompt.ask(
+                "[bold]Enter model name manually[/bold]", default=""
+            ).strip()
             if manual:
                 self.current_model = manual
                 console.print(f"[green]✓[/green] Model: [cyan]{manual}[/cyan]\n")
@@ -700,7 +774,9 @@ class AIAgent:
             return False
 
         self.current_model = models[0]
-        console.print(f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan] [dim]({len(models)} available)[/dim]\n")
+        console.print(
+            f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan] [dim]({len(models)} available)[/dim]\n"
+        )
         return True
 
     def command_provider(self):
@@ -742,7 +818,9 @@ class AIAgent:
 
         if not models:
             console.print("[yellow]⚠ No models available[/yellow]")
-            manual = Prompt.ask("[bold]Enter model name manually[/bold]", default="").strip()
+            manual = Prompt.ask(
+                "[bold]Enter model name manually[/bold]", default=""
+            ).strip()
             if manual:
                 self.current_model = manual
                 console.print(f"[green]✓[/green] Model: [cyan]{manual}[/cyan]\n")
@@ -757,28 +835,36 @@ class AIAgent:
         if not self.setup():
             return
 
+        if not self.service:
+            console.print("[red]❌ No provider configured[/red]")
+            return
+
         cfg = self.services[self.service]
         if cfg.get("supports_tools"):
-            console.print(Panel(
-                "[bold green]🎉 AI Agent Ready![/bold green]\n\n"
-                "The AI can:\n"
-                "  • Create, read, update, delete files\n"
-                "  • List directories\n"
-                "  • Execute safe commands\n"
-                "  • Remember context from files\n\n"
-                "[dim]Try: 'Create a file called workspace/hello.txt with greeting'[/dim]",
-                border_style="green",
-                box=box.ROUNDED
-            ))
+            console.print(
+                Panel(
+                    "[bold green]🎉 AI Agent Ready![/bold green]\n\n"
+                    "The AI can:\n"
+                    "  • Create, read, update, delete files\n"
+                    "  • List directories\n"
+                    "  • Execute safe commands\n"
+                    "  • Remember context from files\n\n"
+                    "[dim]Try: 'Create a file called workspace/hello.txt with greeting'[/dim]",
+                    border_style="green",
+                    box=box.ROUNDED,
+                )
+            )
         else:
-            console.print(Panel(
-                "[bold green]🎉 Chat Ready![/bold green]\n\n"
-                "[yellow]Note: This provider does not support tool use.[/yellow]\n"
-                "AI can chat but cannot perform file operations.\n\n"
-                "[dim]Try: 'Tell me about Python programming'[/dim]",
-                border_style="yellow",
-                box=box.ROUNDED
-            ))
+            console.print(
+                Panel(
+                    "[bold green]🎉 Chat Ready![/bold green]\n\n"
+                    "[yellow]Note: This provider does not support tool use.[/yellow]\n"
+                    "AI can chat but cannot perform file operations.\n\n"
+                    "[dim]Try: 'Tell me about Python programming'[/dim]",
+                    border_style="yellow",
+                    box=box.ROUNDED,
+                )
+            )
 
         while True:
             try:
@@ -828,12 +914,49 @@ class AIAgent:
                     response = self.send_simple_message(user_input)
 
                 if response:
-                    console.print(Panel(
-                        response,
-                        title="[bold]🤖 AI Agent[/bold]",
-                        border_style="blue",
-                        box=box.ROUNDED
-                    ))
+                    # Render markdown for proper formatting (bold, italic, etc.)
+                    if "\n\n[dim]⏱" in response:
+                        content, timing = response.rsplit("\n\n", 1)
+                        content = content.strip()
+                        # Use markdown if content looks like it has formatting
+                        if content and (
+                            "**" in content
+                            or "_" in content
+                            or "`" in content
+                            or "#" in content
+                        ):
+                            display_content = Markdown(content)
+                        else:
+                            display_content = content
+                        console.print(
+                            Panel(
+                                display_content,
+                                title="[bold]🤖 AI Agent[/bold]",
+                                subtitle=timing,
+                                border_style="blue",
+                                box=box.ROUNDED,
+                            )
+                        )
+                    else:
+                        response = response.strip()
+                        # Use markdown if content looks like it has formatting
+                        if response and (
+                            "**" in response
+                            or "_" in response
+                            or "`" in response
+                            or "#" in response
+                        ):
+                            display_content = Markdown(response)
+                        else:
+                            display_content = response
+                        console.print(
+                            Panel(
+                                display_content,
+                                title="[bold]🤖 AI Agent[/bold]",
+                                border_style="blue",
+                                box=box.ROUNDED,
+                            )
+                        )
 
             except (KeyboardInterrupt, EOFError):
                 console.print("\n[cyan]👋 Goodbye![/cyan]")
