@@ -5,7 +5,7 @@ Enables tool use with ANY AI provider by parsing structured commands from text
 
 import re
 import json
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ToolParser:
@@ -102,12 +102,37 @@ class ToolParser:
         )
         if json_match:
             try:
-                return json.loads(json_match.group(0))
+                args = json.loads(json_match.group(0))
+                # Normalize path for file operations
+                if "path" in args and tool_name in [
+                    "create_file",
+                    "read_file",
+                    "update_file",
+                    "delete_file",
+                ]:
+                    args["path"] = cls._normalize_path(args["path"])
+                return args
             except json.JSONDecodeError:
                 pass
 
         # Fallback: extract based on tool type
         return cls._fallback_extraction(match_text, tool_name)
+
+    @classmethod
+    def _normalize_path(cls, path: str) -> str:
+        """Ensure path starts with workspace/ for file operations"""
+        if not path:
+            return "workspace/"
+        path = path.strip()
+        # Don't modify absolute paths or paths that already have workspace/
+        if (
+            path.startswith("workspace/")
+            or path.startswith("/")
+            or path.startswith("\\")
+        ):
+            return path
+        # Add workspace/ prefix
+        return f"workspace/{path}"
 
     @classmethod
     def _fallback_extraction(cls, text: str, tool_name: str) -> Optional[Dict]:
@@ -120,14 +145,16 @@ class ToolParser:
             )
             if path_match:
                 return {
-                    "path": path_match.group(1),
+                    "path": cls._normalize_path(path_match.group(1)),
                     "content": content_match.group(1) if content_match else "",
                 }
 
         elif tool_name in ["read_file", "update_file", "delete_file"]:
             path_match = re.search(r'["\']?path["\']?\s*:\s*["\']([^"\']+)["\']', text)
             if path_match:
-                args = {"path": path_match.group(1)}
+                args: Dict[str, Any] = {
+                    "path": cls._normalize_path(path_match.group(1))
+                }
                 if tool_name == "read_file":
                     start_match = re.search(r'["\']?start_line["\']?\s*:\s*(\d+)', text)
                     end_match = re.search(r'["\']?end_line["\']?\s*:\s*(-?\d+)', text)
@@ -182,17 +209,22 @@ AVAILABLE TOOLS:
 6. execute_command - Execute safe shell commands
    Usage: execute_command({"command": "ls -la"})
 
-INSTRUCTIONS:
-- When you need to perform an action, output the tool call EXACTLY in the format shown above
-- You can make multiple tool calls in one response
-- After tool calls, provide your response to the user
-- Always use paths starting with "workspace/" for file operations
+CRITICAL RULES:
+1. ALL file paths MUST start with "workspace/" - NO EXCEPTIONS
+2. When creating a file, remember the EXACT path you used
+3. When deleting/updating, use the SAME path you used to create it
+4. Always output the tool call EXACTLY in the format shown above
+5. After tool calls, provide your response to the user
 
-Example response:
-I'll create that file for you.
-create_file({"path": "workspace/hello.txt", "content": "Hello World!"})
+Example - Creating then deleting:
+User: Create a file called test.txt
+create_file({"path": "workspace/test.txt", "content": "Hello"})
+User: Delete it
+delete_file({"path": "workspace/test.txt"})
 
-Done! I've created the file."""
+BAD EXAMPLES (these will fail):
+create_file({"path": "test.txt", ...})  # Missing workspace/
+delete_file({"path": "test.txt"})       # Missing workspace/"""
 
 
 class UniversalToolExecutor:
