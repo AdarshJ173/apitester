@@ -223,10 +223,10 @@ class UniversalToolExecutor:
                 {"tool": tool_name, "arguments": arguments, "result": result}
             )
 
-            # Print execution status
+            # Print execution status (use ASCII-safe characters for Windows)
             if result.get("success"):
-                print(f"✓ {tool_name}")
+                print(f"[OK] {tool_name}")
             else:
-                print(f"✗ {tool_name}: {result.get('error')}")
+                print(f"[ERR] {tool_name}: {result.get('error')}")
 
         return cleaned_text, results

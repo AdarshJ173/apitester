@@ -444,6 +444,19 @@ class AIAgent:
                         execute_tool
                     ).process_response(content)
 
+                    # Show tool execution status in console
+                    if results:
+                        console.print()
+                        for result in results:
+                            tool_name = result["tool"]
+                            tool_result = result["result"]
+                            if tool_result.get("success"):
+                                console.print(f"[green]✓[/green] {tool_name}")
+                            else:
+                                console.print(
+                                    f"[red]✗[/red] {tool_name}: {tool_result.get('error', 'Unknown error')}"
+                                )
+
                     # Add results to conversation
                     for result in results:
                         self.conversation.add_message(
