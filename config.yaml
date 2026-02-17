@@ -1,0 +1,231 @@
+# AI Agent CRUD Configuration
+# This file contains default configuration values.
+# Override with environment variables (see .env.example) for sensitive data.
+
+# ============================================
+# Security Settings
+# ============================================
+security:
+  # Maximum file size for operations (in MB)
+  max_file_size_mb: 10
+  
+  # Allowed file extensions for read/write operations
+  allowed_extensions:
+    - ".txt"
+    - ".json"
+    - ".yaml"
+    - ".yml"
+    - ".md"
+    - ".csv"
+    - ".py"
+    - ".js"
+    - ".html"
+    - ".css"
+    - ".xml"
+    - ".log"
+  
+  # Blocked file extensions (cannot be accessed)
+  blocked_extensions:
+    - ".exe"
+    - ".dll"
+    - ".so"
+    - ".dylib"
+    - ".bat"
+    - ".sh"
+    - ".ps1"
+    - ".app"
+    - ".deb"
+    - ".rpm"
+  
+  # Blocked path patterns (path traversal protection)
+  blocked_patterns:
+    - ".."
+    - "~"
+    - "/etc"
+    - "/sys"
+    - "/proc"
+    - "C:\\Windows"
+    - "C:\\Program Files"
+    - "/bin"
+    - "/sbin"
+    - "/usr/bin"
+
+# ============================================
+# Dangerous Commands (blocked without confirmation)
+# ============================================
+dangerous_commands:
+  - "rm"
+  - "del"
+  - "rmdir"
+  - "format"
+  - "fdisk"
+  - "kill"
+  - "shutdown"
+  - "reboot"
+  - "dd"
+
+# ============================================
+# Safe Commands (allowed without confirmation)
+# ============================================
+safe_commands:
+  - "ls"
+  - "dir"
+  - "pwd"
+  - "cd"
+  - "echo"
+  - "cat"
+  - "head"
+  - "tail"
+  - "grep"
+  - "find"
+  - "wc"
+
+# ============================================
+# AI Provider Configuration
+# ============================================
+ai_providers:
+  openai:
+    name: "OpenAI"
+    base_url: "https://api.openai.com/v1"
+    models_endpoint: "/models"
+    chat_endpoint: "/chat/completions"
+    auth_header: "Authorization"
+    auth_prefix: "Bearer"
+    supports_tools: true
+    style: "openai"
+    tool_mode: "text"
+    models:
+      - "gpt-4o"
+      - "gpt-4-turbo"
+      - "gpt-3.5-turbo"
+    
+  anthropic:
+    name: "Anthropic (Claude)"
+    base_url: "https://api.anthropic.com/v1"
+    models_endpoint: null
+    chat_endpoint: "/messages"
+    auth_header: "x-api-key"
+    auth_prefix: null
+    supports_tools: true
+    style: "anthropic"
+    tool_mode: "text"
+    models:
+      - "claude-3-5-sonnet-20241022"
+      - "claude-3-5-haiku-20241022"
+      - "claude-3-opus-20240229"
+  
+  groq:
+    name: "Groq"
+    base_url: "https://api.groq.com/openai/v1"
+    models_endpoint: "/models"
+    chat_endpoint: "/chat/completions"
+    auth_header: "Authorization"
+    auth_prefix: "Bearer"
+    supports_tools: true
+    style: "openai"
+    tool_mode: "text"
+  
+  openrouter:
+    name: "OpenRouter"
+    base_url: "https://openrouter.ai/api/v1"
+    models_endpoint: "/models"
+    chat_endpoint: "/chat/completions"
+    auth_header: "Authorization"
+    auth_prefix: "Bearer"
+    supports_tools: true
+    style: "openai"
+    tool_mode: "text"
+  
+  nvidia:
+    name: "NVIDIA"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    models_endpoint: "/models"
+    chat_endpoint: "/chat/completions"
+    auth_header: "Authorization"
+    auth_prefix: "Bearer"
+    supports_tools: true
+    style: "openai"
+    tool_mode: "text"
+  
+  together:
+    name: "Together AI"
+    base_url: "https://api.together.xyz/v1"
+    models_endpoint: "/models"
+    chat_endpoint: "/chat/completions"
+    auth_header: "Authorization"
+    auth_prefix: "Bearer"
+    supports_tools: true
+    style: "openai"
+    tool_mode: "text"
+  
+  mistral:
+    name: "Mistral AI"
+    base_url: "https://api.mistral.ai/v1"
+    models_endpoint: "/models"
+    chat_endpoint: "/chat/completions"
+    auth_header: "Authorization"
+    auth_prefix: "Bearer"
+    supports_tools: true
+    style: "openai"
+    tool_mode: "text"
+  
+  cohere:
+    name: "Cohere"
+    base_url: "https://api.cohere.ai/v1"
+    models_endpoint: null
+    chat_endpoint: "/chat"
+    auth_header: "Authorization"
+    auth_prefix: "Bearer"
+    supports_tools: true
+    style: "cohere"
+    tool_mode: "text"
+    models:
+      - "command-r-plus"
+      - "command-r"
+      - "command-light"
+
+# ============================================
+# Timeout Settings (in seconds)
+# ============================================
+timeouts:
+  # Command execution timeout
+  command: 30
+  
+  # API request timeout
+  api: 120
+  
+  # API request retry timeout
+  api_retry: 10
+
+# ============================================
+# Conversation Settings
+# ============================================
+conversation:
+  # Maximum number of messages in conversation history
+  max_messages: 20
+  
+  # Maximum tool execution iterations per request
+  max_tool_iterations: 5
+
+# ============================================
+# Logging Configuration
+# ============================================
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  
+  # Enable audit logging
+  enable_audit: true
+  
+  # Log file path (relative to base directory)
+  audit_log_path: "logs/audit.log"
+
+# ============================================
+# Application Settings
+# ============================================
+app:
+  # Configuration file version
+  version: "1.0.0"
+  
+  # Debug mode
+  debug: false

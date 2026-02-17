@@ -19,7 +19,7 @@ from rich.table import Table
 from rich import box
 from rich.markdown import Markdown
 
-from config import ensure_directories
+from config import ensure_directories, API_TIMEOUT, API_RETRY_TIMEOUT
 from agent_tools import execute_tool, TOOLS_DEFINITIONS
 from config_manager import config_manager
 from tool_parser import ToolParser, UniversalToolExecutor
@@ -44,9 +44,7 @@ class Spinner:
             with self._lock:
                 if not self._running:
                     break
-            console.print(
-                f"[dim]{frames[i % len(frames)]} {self.message}...[/dim]", end="\r"
-            )
+            console.print(f"[dim]{frames[i % len(frames)]} {self.message}...[/dim]", end="\r")
             time.sleep(0.08)
             i += 1
         console.print(" " * 100, end="\r")
@@ -72,9 +70,7 @@ class ConversationManager:
 
     def __init__(self, max_messages: int = 20):
         self.messages: deque = deque(maxlen=max_messages)
-        self._pending_context: List[
-            Dict
-        ] = []  # Context messages queued during tool cycles
+        self._pending_context: List[Dict] = []  # Context messages queued during tool cycles
         self.use_text_tools = False
         self.system_prompt_native = """You are a helpful AI assistant with access to file system tools.
 
@@ -260,13 +256,9 @@ class AIAgent:
     def select_provider(self) -> Optional[str]:
         choices = []
         for key, cfg in self.services.items():
-            tools_indicator = (
-                "🔧 Tools" if cfg.get("supports_tools") else "💬 Chat Only"
-            )
+            tools_indicator = "🔧 Tools" if cfg.get("supports_tools") else "💬 Chat Only"
             choices.append(
-                questionary.Choice(
-                    title=f"{cfg['label']:<20} [{tools_indicator}]", value=key
-                )
+                questionary.Choice(title=f"{cfg['label']:<20} [{tools_indicator}]", value=key)
             )
 
         try:
@@ -288,9 +280,7 @@ class AIAgent:
             return os.environ.get(env_var)
 
         try:
-            key = Prompt.ask(
-                f"[bold]Enter API key for {config['label']}[/bold]"
-            ).strip()
+            key = Prompt.ask(f"[bold]Enter API key for {config['label']}[/bold]").strip()
             return key if key else None
         except (KeyboardInterrupt, EOFError):
             return None
@@ -313,7 +303,7 @@ class AIAgent:
         headers = self.get_headers(service)
 
         try:
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = requests.get(url, headers=headers, timeout=API_RETRY_TIMEOUT)
             if resp.status_code == 200:
                 data = resp.json()
                 models: List[str] = []
@@ -332,10 +322,7 @@ class AIAgent:
                     chat_models = [
                         m
                         for m in models
-                        if any(
-                            x in m.lower()
-                            for x in ["llama", "mixtral", "gemma", "deepseek"]
-                        )
+                        if any(x in m.lower() for x in ["llama", "mixtral", "gemma", "deepseek"])
                         and "guard" not in m.lower()
                     ]
 
@@ -410,9 +397,7 @@ class AIAgent:
                     "model": self.current_model,
                     "max_tokens": 4096,
                     "messages": [
-                        m
-                        for m in self.conversation.get_messages()
-                        if m["role"] != "system"
+                        m for m in self.conversation.get_messages() if m["role"] != "system"
                     ],
                     "system": self.conversation.system_prompt,
                 }
@@ -457,9 +442,9 @@ class AIAgent:
                 # Check if this provider uses text-based tool parsing
                 if config.get("tool_mode") == "text":
                     # Parse and execute tools from text
-                    cleaned_content, results = UniversalToolExecutor(
-                        execute_tool
-                    ).process_response(content)
+                    cleaned_content, results = UniversalToolExecutor(execute_tool).process_response(
+                        content
+                    )
 
                     # Show tool execution status in console
                     if results:
@@ -495,7 +480,7 @@ class AIAgent:
 
         except requests.exceptions.Timeout:
             spinner.stop()
-            return "❌ Request timed out (120s)"
+            return f"❌ Request timed out ({API_TIMEOUT}s)"
         except Exception as e:
             spinner.stop()
             return f"❌ Error: {e}"
@@ -571,9 +556,7 @@ class AIAgent:
                 if self.service == "anthropic":
                     # Anthropic: filter system messages out, pass as top-level param
                     api_messages = [
-                        m
-                        for m in self.conversation.get_messages()
-                        if m["role"] != "system"
+                        m for m in self.conversation.get_messages() if m["role"] != "system"
                     ]
                     payload = {
                         "model": self.current_model,
@@ -584,9 +567,7 @@ class AIAgent:
                     }
                 else:
                     # OpenAI-style: sanitize messages to fix tool chain ordering
-                    api_messages = self._sanitize_messages_for_api(
-                        self.conversation.get_messages()
-                    )
+                    api_messages = self._sanitize_messages_for_api(self.conversation.get_messages())
                     payload = {
                         "model": self.current_model,
                         "messages": api_messages,
@@ -594,7 +575,7 @@ class AIAgent:
                         "tool_choice": "auto",
                     }
 
-                resp = requests.post(url, headers=headers, json=payload, timeout=120)
+                resp = requests.post(url, headers=headers, json=payload, timeout=API_TIMEOUT)
 
                 if resp.status_code != 200:
                     spinner.stop()
@@ -609,9 +590,7 @@ class AIAgent:
                     err_lower = str(err).lower()
                     if resp.status_code == 400 and (
                         "tool" in err_lower
-                        and (
-                            "not supported" in err_lower or "not available" in err_lower
-                        )
+                        and ("not supported" in err_lower or "not available" in err_lower)
                     ):
                         # Remove the user message we just added (it will be re-added by send_simple_message)
                         if (
@@ -627,9 +606,7 @@ class AIAgent:
 
                 if self.service == "anthropic":
                     content_blocks = data.get("content", [])
-                    tool_uses = [
-                        b for b in content_blocks if b.get("type") == "tool_use"
-                    ]
+                    tool_uses = [b for b in content_blocks if b.get("type") == "tool_use"]
 
                     if tool_uses:
                         spinner.stop()
@@ -637,9 +614,7 @@ class AIAgent:
                             tool_name = tool_use["name"]
                             tool_args = tool_use["input"]
 
-                            console.print(
-                                f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]"
-                            )
+                            console.print(f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]")
                             result = execute_tool(tool_name, tool_args)
 
                             if result.get("success"):
@@ -648,9 +623,7 @@ class AIAgent:
                                     # self.conversation.inject_file_context(result["path"], result["content"])
                                     pass
                             else:
-                                console.print(
-                                    f"[red]✗ {tool_name}: {result.get('error')}[/red]"
-                                )
+                                console.print(f"[red]✗ {tool_name}: {result.get('error')}[/red]")
 
                             self.conversation.add_message(
                                 "user",
@@ -668,9 +641,7 @@ class AIAgent:
                         spinner.start()
                         continue
 
-                    text_blocks = [
-                        b["text"] for b in content_blocks if b.get("type") == "text"
-                    ]
+                    text_blocks = [b["text"] for b in content_blocks if b.get("type") == "text"]
                     if text_blocks:
                         response_text = "\n".join(text_blocks)
                         self.conversation.flush_pending_context()
@@ -706,9 +677,7 @@ class AIAgent:
                             except json.JSONDecodeError:
                                 tool_args = {}
 
-                            console.print(
-                                f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]"
-                            )
+                            console.print(f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]")
                             result = execute_tool(tool_name, tool_args)
 
                             if result.get("success"):
@@ -719,9 +688,7 @@ class AIAgent:
                                 # The 'content' field in the tool output JSON is what the model sees.
                                 pass
                             else:
-                                console.print(
-                                    f"[red]✗ {tool_name}: {result.get('error')}[/red]"
-                                )
+                                console.print(f"[red]✗ {tool_name}: {result.get('error')}[/red]")
 
                             # Add tool result message with REQUIRED tool_call_id
                             # Add tool result message with REQUIRED tool_call_id
@@ -756,7 +723,7 @@ class AIAgent:
 
         except requests.exceptions.Timeout:
             spinner.stop()
-            return "❌ Request timed out (120s)"
+            return f"❌ Request timed out ({API_TIMEOUT}s)"
         except json.JSONDecodeError as e:
             spinner.stop()
             return f"❌ Invalid JSON in tool arguments: {e}"
@@ -777,9 +744,7 @@ class AIAgent:
         if self.service:
             cfg = self.services[self.service]
             table.add_row("Provider", cfg["label"])
-            table.add_row(
-                "Tools Support", "✅ Yes" if cfg.get("supports_tools") else "❌ No"
-            )
+            table.add_row("Tools Support", "✅ Yes" if cfg.get("supports_tools") else "❌ No")
         if self.current_model:
             table.add_row("Model", self.current_model)
         if self.api_key:
@@ -853,9 +818,7 @@ class AIAgent:
             # Add option for new configuration
             choices.append(questionary.Separator())
             choices.append(
-                questionary.Choice(
-                    title="➕ Configure New Provider", value={"type": "new"}
-                )
+                questionary.Choice(title="➕ Configure New Provider", value={"type": "new"})
             )
 
             try:
@@ -887,12 +850,8 @@ class AIAgent:
                     console.print(
                         f"[green]✓[/green] Provider: [bold]{cfg['label']}[/bold] [dim]{tools_status}[/dim]"
                     )
-                    console.print(
-                        "[green]✓[/green] API key loaded from saved configuration"
-                    )
-                    console.print(
-                        f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan]\n"
-                    )
+                    console.print("[green]✓[/green] API key loaded from saved configuration")
+                    console.print(f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan]\n")
 
                     # Update last used timestamp
                     if self.api_key and self.current_model:
@@ -911,11 +870,7 @@ class AIAgent:
 
         self.service = provider
         cfg = self.services[provider]
-        tools_status = (
-            "with tool support"
-            if cfg.get("supports_tools")
-            else "(chat only, no tools)"
-        )
+        tools_status = "with tool support" if cfg.get("supports_tools") else "(chat only, no tools)"
         console.print(
             f"[green]✓[/green] Provider: [bold]{cfg['label']}[/bold] [dim]{tools_status}[/dim]"
         )
@@ -932,9 +887,7 @@ class AIAgent:
 
         if not models:
             console.print("[yellow]⚠ Could not fetch models[/yellow]")
-            manual = Prompt.ask(
-                "[bold]Enter model name manually[/bold]", default=""
-            ).strip()
+            manual = Prompt.ask("[bold]Enter model name manually[/bold]", default="").strip()
             if manual:
                 self.current_model = manual
                 console.print(f"[green]✓[/green] Model: [cyan]{manual}[/cyan]\n")
@@ -991,9 +944,7 @@ class AIAgent:
 
         if not models:
             console.print("[yellow]⚠ No models available[/yellow]")
-            manual = Prompt.ask(
-                "[bold]Enter model name manually[/bold]", default=""
-            ).strip()
+            manual = Prompt.ask("[bold]Enter model name manually[/bold]", default="").strip()
             if manual:
                 self.current_model = manual
                 console.print(f"[green]✓[/green] Model: [cyan]{manual}[/cyan]\n")
@@ -1083,10 +1034,7 @@ class AIAgent:
                         content = content.strip()
                         # Use markdown if content looks like it has formatting
                         if content and (
-                            "**" in content
-                            or "_" in content
-                            or "`" in content
-                            or "#" in content
+                            "**" in content or "_" in content or "`" in content or "#" in content
                         ):
                             display_content = Markdown(content)
                         else:

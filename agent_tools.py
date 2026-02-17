@@ -1,6 +1,7 @@
 """
 Secure Tool Implementations for AI Agent
 """
+
 import os
 import json
 import subprocess
@@ -9,11 +10,19 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import hashlib
 
-from config import SECURITY, DANGEROUS_COMMANDS, SAFE_COMMANDS, AUDIT_LOG, BASE_DIR
+from config import (
+    SECURITY,
+    DANGEROUS_COMMANDS,
+    SAFE_COMMANDS,
+    AUDIT_LOG,
+    BASE_DIR,
+    COMMAND_TIMEOUT,
+)
 
 
 class SecurityError(Exception):
     """Raised when a security violation is detected"""
+
     pass
 
 
@@ -57,9 +66,7 @@ class SecureFileOps:
                     continue
 
             if not allowed:
-                raise SecurityError(
-                    f"Access denied: Path must be within workspace directories"
-                )
+                raise SecurityError(f"Access denied: Path must be within workspace directories")
 
             # Check for blocked patterns
             path_str = str(resolved)
@@ -94,8 +101,7 @@ class SecureFileOps:
             size_mb = path.stat().st_size / (1024 * 1024)
             if size_mb > SECURITY["max_file_size_mb"]:
                 raise SecurityError(
-                    f"File too large: {size_mb:.2f}MB "
-                    f"(max: {SECURITY['max_file_size_mb']}MB)"
+                    f"File too large: {size_mb:.2f}MB (max: {SECURITY['max_file_size_mb']}MB)"
                 )
 
     @classmethod
@@ -109,16 +115,13 @@ class SecureFileOps:
                 return {
                     "success": False,
                     "error": f"File already exists: {file_path.name}",
-                    "suggestion": "Use update_file to modify existing files"
+                    "suggestion": "Use update_file to modify existing files",
                 }
 
             # Check content size
-            content_size_mb = len(content.encode('utf-8')) / (1024 * 1024)
+            content_size_mb = len(content.encode("utf-8")) / (1024 * 1024)
             if content_size_mb > SECURITY["max_file_size_mb"]:
-                return {
-                    "success": False,
-                    "error": f"Content too large: {content_size_mb:.2f}MB"
-                }
+                return {"success": False, "error": f"Content too large: {content_size_mb:.2f}MB"}
 
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
@@ -129,7 +132,7 @@ class SecureFileOps:
                 "success": True,
                 "path": str(file_path),
                 "size_bytes": len(content),
-                "message": f"Created {file_path.name}"
+                "message": f"Created {file_path.name}",
             }
 
         except SecurityError as e:
@@ -153,39 +156,45 @@ class SecureFileOps:
                 return {"success": False, "error": "Path is not a file"}
 
             content = file_path.read_text(encoding="utf-8")
-            
+
             # Line-based reading
             lines = content.splitlines()
             total_lines = len(lines)
-            
+
             # Default to all lines if end_line is -1
             if end_line == -1:
                 end_line = total_lines
-                
+
             # Clamp values
             start_line = max(1, start_line)
             end_line = min(total_lines, end_line)
-            
+
             if start_line > end_line:
                 if total_lines == 0:
                     return {
-                        "success": True, 
-                        "path": str(file_path), 
-                        "content": "", 
-                        "size_bytes": 0, 
-                        "lines": 0
+                        "success": True,
+                        "path": str(file_path),
+                        "content": "",
+                        "size_bytes": 0,
+                        "lines": 0,
                     }
-                return {"success": False, "error": f"Invalid line range: {start_line} to {end_line} (File has {total_lines} lines)"}
+                return {
+                    "success": False,
+                    "error": f"Invalid line range: {start_line} to {end_line} (File has {total_lines} lines)",
+                }
 
             # Extract lines (0-indexed slice)
-            selected_lines = lines[start_line-1:end_line]
+            selected_lines = lines[start_line - 1 : end_line]
             result_content = "\n".join(selected_lines)
 
-            AuditLogger.log("read_file", {
-                "path": str(file_path), 
-                "lines": f"{start_line}-{end_line}",
-                "size": len(result_content)
-            })
+            AuditLogger.log(
+                "read_file",
+                {
+                    "path": str(file_path),
+                    "lines": f"{start_line}-{end_line}",
+                    "size": len(result_content),
+                },
+            )
 
             return {
                 "success": True,
@@ -195,7 +204,7 @@ class SecureFileOps:
                 "lines": len(selected_lines),
                 "total_lines": total_lines,
                 "start_line": start_line,
-                "end_line": end_line
+                "end_line": end_line,
             }
 
         except SecurityError as e:
@@ -217,7 +226,7 @@ class SecureFileOps:
                 return {
                     "success": False,
                     "error": "File not found",
-                    "suggestion": "Use create_file for new files"
+                    "suggestion": "Use create_file for new files",
                 }
 
             # Backup old content
@@ -227,17 +236,16 @@ class SecureFileOps:
 
             file_path.write_text(content, encoding="utf-8")
 
-            AuditLogger.log("update_file", {
-                "path": str(file_path),
-                "old_size": len(old_content),
-                "new_size": len(content)
-            })
+            AuditLogger.log(
+                "update_file",
+                {"path": str(file_path), "old_size": len(old_content), "new_size": len(content)},
+            )
 
             return {
                 "success": True,
                 "path": str(file_path),
                 "backup": str(backup_path),
-                "message": f"Updated {file_path.name}"
+                "message": f"Updated {file_path.name}",
             }
 
         except SecurityError as e:
@@ -263,11 +271,7 @@ class SecureFileOps:
 
             AuditLogger.log("delete_file", {"path": str(file_path), "size": size})
 
-            return {
-                "success": True,
-                "path": str(file_path),
-                "message": f"Deleted {file_path.name}"
-            }
+            return {"success": True, "path": str(file_path), "message": f"Deleted {file_path.name}"}
 
         except SecurityError as e:
             AuditLogger.log("delete_file", {"path": path, "error": str(e)}, "denied")
@@ -291,23 +295,20 @@ class SecureFileOps:
             for item in sorted(dir_path.iterdir()):
                 try:
                     stat = item.stat()
-                    items.append({
-                        "name": item.name,
-                        "type": "dir" if item.is_dir() else "file",
-                        "size": stat.st_size if item.is_file() else None,
-                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    })
+                    items.append(
+                        {
+                            "name": item.name,
+                            "type": "dir" if item.is_dir() else "file",
+                            "size": stat.st_size if item.is_file() else None,
+                            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        }
+                    )
                 except Exception:
                     continue
 
             AuditLogger.log("list_directory", {"path": str(dir_path), "items": len(items)})
 
-            return {
-                "success": True,
-                "path": str(dir_path),
-                "items": items,
-                "count": len(items)
-            }
+            return {"success": True, "path": str(dir_path), "items": items, "count": len(items)}
 
         except SecurityError as e:
             AuditLogger.log("list_directory", {"path": path, "error": str(e)}, "denied")
@@ -344,14 +345,11 @@ class SecureCommandRunner:
             is_safe, reason = cls.validate_command(command)
 
             if not is_safe:
-                AuditLogger.log("execute_command", {
-                    "command": command,
-                    "error": reason
-                }, "blocked")
+                AuditLogger.log("execute_command", {"command": command, "error": reason}, "blocked")
                 return {
                     "success": False,
                     "error": f"Command blocked: {reason}",
-                    "requires_confirmation": True
+                    "requires_confirmation": True,
                 }
 
             # Execute command
@@ -360,25 +358,24 @@ class SecureCommandRunner:
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=30,  # 30 second timeout
-                cwd=str(SECURITY["allowed_directories"][0])  # Run in workspace
+                timeout=COMMAND_TIMEOUT,  # Configurable timeout
+                cwd=str(SECURITY["allowed_directories"][0]),  # Run in workspace
             )
 
-            AuditLogger.log("execute_command", {
-                "command": command,
-                "returncode": result.returncode
-            })
+            AuditLogger.log(
+                "execute_command", {"command": command, "returncode": result.returncode}
+            )
 
             return {
                 "success": result.returncode == 0,
                 "command": command,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
-                "returncode": result.returncode
+                "returncode": result.returncode,
             }
 
         except subprocess.TimeoutExpired:
-            return {"success": False, "error": "Command timeout (30s)"}
+            return {"success": False, "error": f"Command timeout ({COMMAND_TIMEOUT}s)"}
         except Exception as e:
             return {"success": False, "error": f"Command execution failed: {e}"}
 
@@ -395,16 +392,13 @@ TOOLS_DEFINITIONS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "File path relative to workspace (e.g., 'test.txt' or 'folder/file.json')"
+                        "description": "File path relative to workspace (e.g., 'test.txt' or 'folder/file.json')",
                     },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write to the file"
-                    }
+                    "content": {"type": "string", "description": "Content to write to the file"},
                 },
-                "required": ["path", "content"]
-            }
-        }
+                "required": ["path", "content"],
+            },
+        },
     },
     {
         "type": "function",
@@ -414,22 +408,19 @@ TOOLS_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to read"
-                    },
+                    "path": {"type": "string", "description": "Path to the file to read"},
                     "start_line": {
                         "type": "integer",
-                        "description": "Start line number (1-based, default: 1)"
+                        "description": "Start line number (1-based, default: 1)",
                     },
                     "end_line": {
                         "type": "integer",
-                        "description": "End line number (default: -1 for end of file)"
-                    }
+                        "description": "End line number (default: -1 for end of file)",
+                    },
                 },
-                "required": ["path"]
-            }
-        }
+                "required": ["path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -439,18 +430,12 @@ TOOLS_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to update"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "New content for the file"
-                    }
+                    "path": {"type": "string", "description": "Path to the file to update"},
+                    "content": {"type": "string", "description": "New content for the file"},
                 },
-                "required": ["path", "content"]
-            }
-        }
+                "required": ["path", "content"],
+            },
+        },
     },
     {
         "type": "function",
@@ -460,14 +445,11 @@ TOOLS_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to delete"
-                    }
+                    "path": {"type": "string", "description": "Path to the file to delete"}
                 },
-                "required": ["path"]
-            }
-        }
+                "required": ["path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -479,12 +461,12 @@ TOOLS_DEFINITIONS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Directory path to list (default: '.')"
+                        "description": "Directory path to list (default: '.')",
                     }
                 },
-                "required": ["path"]
-            }
-        }
+                "required": ["path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -494,15 +476,12 @@ TOOLS_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Shell command to execute"
-                    }
+                    "command": {"type": "string", "description": "Shell command to execute"}
                 },
-                "required": ["command"]
-            }
-        }
-    }
+                "required": ["command"],
+            },
+        },
+    },
 ]
 
 
