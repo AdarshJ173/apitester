@@ -2,12 +2,8 @@
 Tests for config_manager.py module
 """
 
-import os
 import json
-import pytest
-from pathlib import Path
-from unittest.mock import patch, mock_open, MagicMock
-from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 
 class TestProviderConfig:
@@ -53,7 +49,7 @@ class TestConfigManagerInit:
         from config_manager import ConfigManager
 
         with patch.object(ConfigManager, "_load") as mock_load:
-            manager = ConfigManager()
+            ConfigManager()
             mock_load.assert_called_once()
 
 
@@ -215,14 +211,13 @@ class TestConfigManagerSetProviderConfig:
         """Test set_provider_config creates providers dict if missing"""
         from config_manager import ConfigManager
 
-        with patch.object(ConfigManager, "_load"):
-            with patch.object(ConfigManager, "save"):
-                manager = ConfigManager()
-                del manager.config["providers"]  # Remove providers key
+        with patch.object(ConfigManager, "_load"), patch.object(ConfigManager, "save"):
+            manager = ConfigManager()
+            del manager.config["providers"]  # Remove providers key
 
-                manager.set_provider_config("openai", "key", "model")
+            manager.set_provider_config("openai", "key", "model")
 
-                assert "providers" in manager.config
+            assert "providers" in manager.config
 
 
 class TestConfigManagerGetLastProvider:
@@ -357,15 +352,14 @@ class TestConfigManagerClearProvider:
         """Test clearing provider updates last_provider if it was the last used"""
         from config_manager import ConfigManager
 
-        with patch.object(ConfigManager, "_load"):
-            with patch.object(ConfigManager, "save"):
-                manager = ConfigManager()
-                manager.config["providers"]["openai"] = {"api_key": "test"}
-                manager.config["last_provider"] = "openai"
+        with patch.object(ConfigManager, "_load"), patch.object(ConfigManager, "save"):
+            manager = ConfigManager()
+            manager.config["providers"]["openai"] = {"api_key": "test"}
+            manager.config["last_provider"] = "openai"
 
-                manager.clear_provider("openai")
+            manager.clear_provider("openai")
 
-                assert manager.config["last_provider"] == ""
+            assert manager.config["last_provider"] == ""
 
 
 class TestGlobalConfigInstance:
@@ -373,6 +367,6 @@ class TestGlobalConfigInstance:
 
     def test_global_instance_exists(self):
         """Test global config_manager instance is created"""
-        from config_manager import config_manager, ConfigManager
+        from config_manager import ConfigManager, config_manager
 
         assert isinstance(config_manager, ConfigManager)

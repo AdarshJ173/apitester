@@ -4,10 +4,9 @@ Handles persistent storage of API keys and preferences
 """
 
 import json
-import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
-from dataclasses import dataclass, asdict
+from typing import Optional
 
 
 @dataclass
@@ -25,7 +24,7 @@ class ConfigManager:
     CONFIG_FILE = Path(".ai_agent_config.json")
 
     def __init__(self):
-        self.config: Dict[str, any] = {
+        self.config: dict[str, any] = {
             "last_provider": "",
             "providers": {},
             "version": "1.0",
@@ -36,7 +35,7 @@ class ConfigManager:
         """Load configuration from file"""
         if self.CONFIG_FILE.exists():
             try:
-                with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
+                with open(self.CONFIG_FILE, encoding="utf-8") as f:
                     loaded = json.load(f)
                     self.config.update(loaded)
             except Exception:
@@ -78,7 +77,7 @@ class ConfigManager:
         """Check if we have saved config for a provider"""
         return provider in self.config.get("providers", {})
 
-    def get_all_saved_providers(self) -> Dict[str, ProviderConfig]:
+    def get_all_saved_providers(self) -> dict[str, ProviderConfig]:
         """Get all providers with saved configuration"""
         providers = {}
         for name, data in self.config.get("providers", {}).items():

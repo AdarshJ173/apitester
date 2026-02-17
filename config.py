@@ -4,27 +4,28 @@ Supports external YAML configuration and environment variables
 """
 
 import os
-import yaml
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+
+import yaml
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
 
-def load_yaml_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+def load_yaml_config(config_path: Optional[Path] = None) -> dict[str, Any]:
     """Load configuration from YAML file"""
     if config_path is None:
         config_path = Path(__file__).parent / "config.yaml"
 
     if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     return {}
 
 
-def parse_list_from_env(env_value: Optional[str], delimiter: str = ",") -> List[str]:
+def parse_list_from_env(env_value: Optional[str], delimiter: str = ",") -> list[str]:
     """Parse comma-separated environment variable into list"""
     if not env_value:
         return []

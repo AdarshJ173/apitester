@@ -3,10 +3,10 @@ Tests for config.py module
 """
 
 import os
-import pytest
-import yaml
 from pathlib import Path
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
+
+import yaml
 
 
 class TestLoadYamlConfig:
@@ -186,7 +186,7 @@ class TestConfigurationValues:
 
     def test_timeout_values_are_integers(self):
         """Test timeout constants are integers"""
-        from config import COMMAND_TIMEOUT, API_TIMEOUT, API_RETRY_TIMEOUT
+        from config import API_RETRY_TIMEOUT, API_TIMEOUT, COMMAND_TIMEOUT
 
         assert isinstance(COMMAND_TIMEOUT, int)
         assert isinstance(API_TIMEOUT, int)
@@ -206,7 +206,7 @@ class TestConfigurationValues:
 
     def test_logging_settings(self):
         """Test logging configuration"""
-        from config import LOG_LEVEL, ENABLE_AUDIT_LOGGING, AUDIT_LOG
+        from config import AUDIT_LOG, ENABLE_AUDIT_LOGGING, LOG_LEVEL
 
         assert LOG_LEVEL in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         assert isinstance(ENABLE_AUDIT_LOGGING, bool)
@@ -224,7 +224,7 @@ class TestEnsureDirectories:
 
     def test_creates_workspace_directory(self, tmp_path):
         """Test workspace directory is created"""
-        from config import ensure_directories, BASE_DIR
+        from config import ensure_directories
 
         with patch("config.BASE_DIR", tmp_path):
             ensure_directories()
@@ -267,6 +267,7 @@ class TestEnvironmentVariableOverride:
         with patch.dict(os.environ, {"MAX_FILE_SIZE_MB": "50"}):
             # Must reimport to pick up new env var
             import importlib
+
             import config
 
             importlib.reload(config)
@@ -277,6 +278,7 @@ class TestEnvironmentVariableOverride:
         """Test LOG_LEVEL can be overridden via env var"""
         with patch.dict(os.environ, {"LOG_LEVEL": "DEBUG"}):
             import importlib
+
             import config
 
             importlib.reload(config)
@@ -287,6 +289,7 @@ class TestEnvironmentVariableOverride:
         """Test DEBUG can be overridden via env var"""
         with patch.dict(os.environ, {"DEBUG": "true"}):
             import importlib
+
             import config
 
             importlib.reload(config)

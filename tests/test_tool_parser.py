@@ -2,9 +2,7 @@
 Tests for tool_parser.py module
 """
 
-import json
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class TestToolParserPatterns:

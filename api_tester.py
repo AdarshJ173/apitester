@@ -3,24 +3,24 @@ Universal API Tester with AI Agent Capabilities
 Fixed: Tool message formatting for OpenAI/Groq
 """
 
-import time
-import threading
 import json
 import os
-from typing import Dict, List, Optional
+import threading
+import time
 from collections import deque
+from typing import Optional
 
-import requests
 import questionary
-from rich.console import Console
-from rich.prompt import Prompt
-from rich.panel import Panel
-from rich.table import Table
+import requests
 from rich import box
+from rich.console import Console
 from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.prompt import Prompt
+from rich.table import Table
 
-from config import ensure_directories, API_TIMEOUT, API_RETRY_TIMEOUT
-from agent_tools import execute_tool, TOOLS_DEFINITIONS
+from agent_tools import TOOLS_DEFINITIONS, execute_tool
+from config import API_RETRY_TIMEOUT, API_TIMEOUT, ensure_directories
 from config_manager import config_manager
 from tool_parser import ToolParser, UniversalToolExecutor
 
@@ -70,7 +70,7 @@ class ConversationManager:
 
     def __init__(self, max_messages: int = 20):
         self.messages: deque = deque(maxlen=max_messages)
-        self._pending_context: List[Dict] = []  # Context messages queued during tool cycles
+        self._pending_context: list[dict] = []  # Context messages queued during tool cycles
         self.use_text_tools = False
         self.system_prompt_native = """You are a helpful AI assistant with access to file system tools.
 
@@ -118,7 +118,7 @@ When you read files, their content becomes part of your context - reference it i
             self.messages.append(msg)
         self._pending_context.clear()
 
-    def get_messages(self) -> List[Dict]:
+    def get_messages(self) -> list[dict]:
         """Build properly formatted message list for the API.
 
         Ensures:
@@ -144,9 +144,9 @@ class AIAgent:
         self.service: Optional[str] = None
         self.current_model: Optional[str] = None
         self.conversation = ConversationManager()
-        self._model_cache: Dict[str, List[str]] = {}
+        self._model_cache: dict[str, list[str]] = {}
 
-        self.services: Dict[str, Dict] = {
+        self.services: dict[str, dict] = {
             "openai": {
                 "label": "OpenAI",
                 "base_url": "https://api.openai.com/v1",
@@ -243,7 +243,7 @@ class AIAgent:
             },
         }
 
-    def get_headers(self, service: str) -> Dict[str, str]:
+    def get_headers(self, service: str) -> dict[str, str]:
         config = self.services[service]
         auth_header = config["auth_header"]
         prefix = config.get("auth_prefix")
@@ -285,7 +285,7 @@ class AIAgent:
         except (KeyboardInterrupt, EOFError):
             return None
 
-    def fetch_models(self, service: str, use_cache: bool = True) -> List[str]:
+    def fetch_models(self, service: str, use_cache: bool = True) -> list[str]:
         if use_cache and service in self._model_cache:
             return self._model_cache[service]
 
@@ -306,7 +306,7 @@ class AIAgent:
             resp = requests.get(url, headers=headers, timeout=API_RETRY_TIMEOUT)
             if resp.status_code == 200:
                 data = resp.json()
-                models: List[str] = []
+                models: list[str] = []
 
                 if isinstance(data, dict) and "data" in data:
                     for m in data["data"]:
@@ -348,7 +348,7 @@ class AIAgent:
                     return models
 
             elif resp.status_code == 401:
-                console.print(f"[red]❌ Authentication failed (401)[/red]")
+                console.print("[red]❌ Authentication failed (401)[/red]")
                 return []
 
         except Exception as e:
@@ -357,7 +357,7 @@ class AIAgent:
 
         return []
 
-    def select_model(self, models: List[str]) -> Optional[str]:
+    def select_model(self, models: list[str]) -> Optional[str]:
         if not models:
             console.print("[yellow]No models available[/yellow]")
             return None
@@ -485,7 +485,7 @@ class AIAgent:
             spinner.stop()
             return f"❌ Error: {e}"
 
-    def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
+    def _sanitize_messages_for_api(self, messages: list[dict]) -> list[dict]:
         """Sanitize messages to ensure proper format for OpenAI-style APIs.
 
         Rules enforced:
@@ -730,7 +730,7 @@ class AIAgent:
         except requests.exceptions.ConnectionError as e:
             spinner.stop()
             if "10013" in str(e):
-                return f"❌ Network access denied (WinError 10013). Check your firewall, antivirus, or VPN settings."
+                return "❌ Network access denied (WinError 10013). Check your firewall, antivirus, or VPN settings."
             return f"❌ Connection error: {e}"
         except Exception as e:
             spinner.stop()
@@ -963,7 +963,7 @@ class AIAgent:
             console.print("[red]❌ No provider configured[/red]")
             return
 
-        cfg = self.services[self.service]
+        self.services[self.service]
 
         # All providers now use text-based tools
         self.conversation.set_tool_mode(True)

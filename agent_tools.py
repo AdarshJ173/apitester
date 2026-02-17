@@ -2,21 +2,16 @@
 Secure Tool Implementations for AI Agent
 """
 
-import os
 import json
 import subprocess
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 from datetime import datetime
-import hashlib
+from pathlib import Path
 
 from config import (
-    SECURITY,
-    DANGEROUS_COMMANDS,
-    SAFE_COMMANDS,
     AUDIT_LOG,
-    BASE_DIR,
     COMMAND_TIMEOUT,
+    DANGEROUS_COMMANDS,
+    SECURITY,
 )
 
 
@@ -30,7 +25,7 @@ class AuditLogger:
     """Fast, thread-safe audit logger"""
 
     @staticmethod
-    def log(action: str, details: Dict, status: str = "success"):
+    def log(action: str, details: dict, status: str = "success"):
         """Log actions with timestamp"""
         try:
             entry = {
@@ -66,7 +61,7 @@ class SecureFileOps:
                     continue
 
             if not allowed:
-                raise SecurityError(f"Access denied: Path must be within workspace directories")
+                raise SecurityError("Access denied: Path must be within workspace directories")
 
             # Check for blocked patterns
             path_str = str(resolved)
@@ -105,7 +100,7 @@ class SecureFileOps:
                 )
 
     @classmethod
-    def create_file(cls, path: str, content: str) -> Dict:
+    def create_file(cls, path: str, content: str) -> dict:
         """Create a new file with content"""
         try:
             file_path = cls.validate_path(path)
@@ -142,7 +137,7 @@ class SecureFileOps:
             return {"success": False, "error": f"Failed to create file: {e}"}
 
     @classmethod
-    def read_file(cls, path: str, start_line: int = 1, end_line: int = -1) -> Dict:
+    def read_file(cls, path: str, start_line: int = 1, end_line: int = -1) -> dict:
         """Read file content with optional line range"""
         try:
             file_path = cls.validate_path(path)
@@ -216,7 +211,7 @@ class SecureFileOps:
             return {"success": False, "error": f"Failed to read file: {e}"}
 
     @classmethod
-    def update_file(cls, path: str, content: str) -> Dict:
+    def update_file(cls, path: str, content: str) -> dict:
         """Update existing file content"""
         try:
             file_path = cls.validate_path(path)
@@ -255,7 +250,7 @@ class SecureFileOps:
             return {"success": False, "error": f"Failed to update file: {e}"}
 
     @classmethod
-    def delete_file(cls, path: str) -> Dict:
+    def delete_file(cls, path: str) -> dict:
         """Delete a file (requires confirmation)"""
         try:
             file_path = cls.validate_path(path)
@@ -280,7 +275,7 @@ class SecureFileOps:
             return {"success": False, "error": f"Failed to delete file: {e}"}
 
     @classmethod
-    def list_directory(cls, path: str = ".") -> Dict:
+    def list_directory(cls, path: str = ".") -> dict:
         """List directory contents"""
         try:
             dir_path = cls.validate_path(path)
@@ -321,7 +316,7 @@ class SecureCommandRunner:
     """Secure command execution with validation"""
 
     @staticmethod
-    def validate_command(command: str) -> Tuple[bool, str]:
+    def validate_command(command: str) -> tuple[bool, str]:
         """Check if command is safe to run"""
         cmd_lower = command.lower().strip()
 
@@ -339,7 +334,7 @@ class SecureCommandRunner:
         return True, "OK"
 
     @classmethod
-    def execute_command(cls, command: str, require_confirmation: bool = False) -> Dict:
+    def execute_command(cls, command: str, require_confirmation: bool = False) -> dict:
         """Execute shell command with security checks"""
         try:
             is_safe, reason = cls.validate_command(command)
@@ -485,7 +480,7 @@ TOOLS_DEFINITIONS = [
 ]
 
 
-def execute_tool(tool_name: str, arguments: Dict) -> Dict:
+def execute_tool(tool_name: str, arguments: dict) -> dict:
     """Execute a tool and return results"""
     tools = {
         "create_file": SecureFileOps.create_file,

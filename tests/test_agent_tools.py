@@ -2,12 +2,11 @@
 Tests for agent_tools.py module
 """
 
-import os
-import pytest
 import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
-from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestSecurityError:
@@ -52,7 +51,7 @@ class TestAuditLogger:
         from agent_tools import AuditLogger
 
         # Should not raise exception even if logging fails
-        with patch("builtins.open", side_effect=IOError("Cannot write")):
+        with patch("builtins.open", side_effect=OSError("Cannot write")):
             result = AuditLogger.log("test_action", {})
             # Function should complete without exception
             assert result is None
@@ -64,14 +63,13 @@ class TestSecureFileOpsValidatePath:
     def test_valid_path_within_workspace(self, tmp_path):
         """Test valid path within allowed directory"""
         from agent_tools import SecureFileOps
-        from config import BASE_DIR
 
         test_file = tmp_path / "workspace" / "test.txt"
         test_file.parent.mkdir(parents=True, exist_ok=True)
 
         with patch("config.SECURITY") as mock_security:
-            mock_security.__getitem__ = (
-                lambda s, k: [tmp_path] if k == "allowed_directories" else []
+            mock_security.__getitem__ = lambda s, k: (
+                [tmp_path] if k == "allowed_directories" else []
             )
 
             result = SecureFileOps.validate_path(str(test_file))
@@ -85,9 +83,7 @@ class TestSecureFileOpsValidatePath:
             mock_security.__getitem__ = lambda s, k: (
                 [tmp_path]
                 if k == "allowed_directories"
-                else [".."]
-                if k == "blocked_patterns"
-                else []
+                else [".."] if k == "blocked_patterns" else []
             )
 
             with pytest.raises(SecurityError):
@@ -127,9 +123,7 @@ class TestSecureFileOpsValidateExtension:
             mock_security.__getitem__ = lambda s, k: (
                 [".xyz"]
                 if k == "blocked_extensions"
-                else [".txt"]
-                if k == "allowed_extensions"
-                else []
+                else [".txt"] if k == "allowed_extensions" else []
             )
 
             with pytest.raises(SecurityError):
@@ -183,27 +177,23 @@ class TestSecureFileOpsCreateFile:
     def test_create_new_file_success(self, tmp_path):
         """Test creating a new file successfully"""
         from agent_tools import SecureFileOps
-        from config import BASE_DIR
 
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         test_file = workspace / "test.txt"
 
-        with patch("config.BASE_DIR", tmp_path):
-            with patch("config.SECURITY") as mock_security:
-                mock_security.__getitem__ = lambda s, k: (
-                    [tmp_path]
-                    if k == "allowed_directories"
-                    else [".txt"]
-                    if k == "allowed_extensions"
-                    else []
-                )
+        with patch("config.BASE_DIR", tmp_path), patch("config.SECURITY") as mock_security:
+            mock_security.__getitem__ = lambda s, k: (
+                [tmp_path]
+                if k == "allowed_directories"
+                else [".txt"] if k == "allowed_extensions" else []
+            )
 
-                result = SecureFileOps.create_file(str(test_file), "Test content")
+            result = SecureFileOps.create_file(str(test_file), "Test content")
 
-                assert result["success"] is True
-                assert test_file.exists()
-                assert test_file.read_text() == "Test content"
+            assert result["success"] is True
+            assert test_file.exists()
+            assert test_file.read_text() == "Test content"
 
     def test_create_existing_file_fails(self, tmp_path):
         """Test creating file that already exists fails"""
@@ -249,11 +239,9 @@ class TestSecureFileOpsReadFile:
             mock_security.__getitem__ = lambda s, k: (
                 [tmp_path]
                 if k == "allowed_directories"
-                else [".txt"]
-                if k == "allowed_extensions"
-                else 10
-                if k == "max_file_size_mb"
-                else []
+                else (
+                    [".txt"] if k == "allowed_extensions" else 10 if k == "max_file_size_mb" else []
+                )
             )
 
             result = SecureFileOps.read_file(str(test_file))
@@ -273,11 +261,9 @@ class TestSecureFileOpsReadFile:
             mock_security.__getitem__ = lambda s, k: (
                 [tmp_path]
                 if k == "allowed_directories"
-                else [".txt"]
-                if k == "allowed_extensions"
-                else 10
-                if k == "max_file_size_mb"
-                else []
+                else (
+                    [".txt"] if k == "allowed_extensions" else 10 if k == "max_file_size_mb" else []
+                )
             )
 
             result = SecureFileOps.read_file(str(test_file), start_line=2, end_line=4)
@@ -294,11 +280,9 @@ class TestSecureFileOpsReadFile:
             mock_security.__getitem__ = lambda s, k: (
                 [Path("/tmp")]
                 if k == "allowed_directories"
-                else [".txt"]
-                if k == "allowed_extensions"
-                else 10
-                if k == "max_file_size_mb"
-                else []
+                else (
+                    [".txt"] if k == "allowed_extensions" else 10 if k == "max_file_size_mb" else []
+                )
             )
 
             result = SecureFileOps.read_file("/tmp/nonexistent.txt")
@@ -321,9 +305,7 @@ class TestSecureFileOpsUpdateFile:
             mock_security.__getitem__ = lambda s, k: (
                 [tmp_path]
                 if k == "allowed_directories"
-                else [".txt"]
-                if k == "allowed_extensions"
-                else []
+                else [".txt"] if k == "allowed_extensions" else []
             )
 
             result = SecureFileOps.update_file(str(test_file), "New content")
@@ -359,8 +341,8 @@ class TestSecureFileOpsDeleteFile:
         test_file.write_text("Content to delete")
 
         with patch("config.SECURITY") as mock_security:
-            mock_security.__getitem__ = (
-                lambda s, k: [tmp_path] if k == "allowed_directories" else []
+            mock_security.__getitem__ = lambda s, k: (
+                [tmp_path] if k == "allowed_directories" else []
             )
 
             result = SecureFileOps.delete_file(str(test_file))
@@ -373,8 +355,8 @@ class TestSecureFileOpsDeleteFile:
         from agent_tools import SecureFileOps
 
         with patch("config.SECURITY") as mock_security:
-            mock_security.__getitem__ = (
-                lambda s, k: [Path("/tmp")] if k == "allowed_directories" else []
+            mock_security.__getitem__ = lambda s, k: (
+                [Path("/tmp")] if k == "allowed_directories" else []
             )
 
             result = SecureFileOps.delete_file("/tmp/nonexistent.txt")
@@ -396,8 +378,8 @@ class TestSecureFileOpsListDirectory:
         (tmp_path / "subdir").mkdir()
 
         with patch("config.SECURITY") as mock_security:
-            mock_security.__getitem__ = (
-                lambda s, k: [tmp_path] if k == "allowed_directories" else []
+            mock_security.__getitem__ = lambda s, k: (
+                [tmp_path] if k == "allowed_directories" else []
             )
 
             result = SecureFileOps.list_directory(str(tmp_path))
@@ -415,8 +397,8 @@ class TestSecureFileOpsListDirectory:
         from agent_tools import SecureFileOps
 
         with patch("config.SECURITY") as mock_security:
-            mock_security.__getitem__ = (
-                lambda s, k: [Path("/tmp")] if k == "allowed_directories" else []
+            mock_security.__getitem__ = lambda s, k: (
+                [Path("/tmp")] if k == "allowed_directories" else []
             )
 
             result = SecureFileOps.list_directory("/tmp/nonexistent_dir")
@@ -469,8 +451,8 @@ class TestSecureCommandRunnerExecuteCommand:
         mock_run.return_value = MagicMock(returncode=0, stdout="output", stderr="")
 
         with patch("config.SECURITY") as mock_security:
-            mock_security.__getitem__ = (
-                lambda s, k: [Path("/tmp")] if k == "allowed_directories" else []
+            mock_security.__getitem__ = lambda s, k: (
+                [Path("/tmp")] if k == "allowed_directories" else []
             )
 
             result = SecureCommandRunner.execute_command("echo test")
@@ -486,8 +468,8 @@ class TestSecureCommandRunnerExecuteCommand:
 
         with patch("config.DANGEROUS_COMMANDS", ["rm"]):
             with patch("config.SECURITY") as mock_security:
-                mock_security.__getitem__ = (
-                    lambda s, k: [Path("/tmp")] if k == "allowed_directories" else []
+                mock_security.__getitem__ = lambda s, k: (
+                    [Path("/tmp")] if k == "allowed_directories" else []
                 )
 
                 result = SecureCommandRunner.execute_command("rm -rf /")
@@ -499,14 +481,15 @@ class TestSecureCommandRunnerExecuteCommand:
     @patch("agent_tools.subprocess.run")
     def test_command_timeout(self, mock_run):
         """Test command timeout handling"""
-        from agent_tools import SecureCommandRunner
         import subprocess
+
+        from agent_tools import SecureCommandRunner
 
         mock_run.side_effect = subprocess.TimeoutExpired("cmd", 30)
 
         with patch("config.SECURITY") as mock_security:
-            mock_security.__getitem__ = (
-                lambda s, k: [Path("/tmp")] if k == "allowed_directories" else []
+            mock_security.__getitem__ = lambda s, k: (
+                [Path("/tmp")] if k == "allowed_directories" else []
             )
 
             result = SecureCommandRunner.execute_command("sleep 60")
@@ -534,21 +517,18 @@ class TestExecuteTool:
         test_file = tmp_path / "workspace" / "test.txt"
         test_file.parent.mkdir(parents=True)
 
-        with patch("config.BASE_DIR", tmp_path):
-            with patch("config.SECURITY") as mock_security:
-                mock_security.__getitem__ = lambda s, k: (
-                    [tmp_path]
-                    if k == "allowed_directories"
-                    else [".txt"]
-                    if k == "allowed_extensions"
-                    else []
-                )
+        with patch("config.BASE_DIR", tmp_path), patch("config.SECURITY") as mock_security:
+            mock_security.__getitem__ = lambda s, k: (
+                [tmp_path]
+                if k == "allowed_directories"
+                else [".txt"] if k == "allowed_extensions" else []
+            )
 
-                result = execute_tool(
-                    "create_file", {"path": str(test_file), "content": "Test content"}
-                )
+            result = execute_tool(
+                "create_file", {"path": str(test_file), "content": "Test content"}
+            )
 
-                assert result["success"] is True
+            assert result["success"] is True
 
     def test_execute_list_directory_default_path(self):
         """Test list_directory with default path"""

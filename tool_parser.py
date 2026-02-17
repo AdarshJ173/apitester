@@ -3,9 +3,9 @@ Universal Tool Parser for Text-Based AI Responses
 Enables tool use with ANY AI provider by parsing structured commands from text
 """
 
-import re
 import json
-from typing import Any, Dict, List, Optional, Tuple
+import re
+from typing import Any, Optional
 
 
 class ToolParser:
@@ -52,7 +52,7 @@ class ToolParser:
     }
 
     @classmethod
-    def parse_text_response(cls, text: str) -> Tuple[str, List[Dict]]:
+    def parse_text_response(cls, text: str) -> tuple[str, list[dict]]:
         """
         Parse AI text response for tool commands
 
@@ -93,13 +93,11 @@ class ToolParser:
         return cleaned_text, tool_calls
 
     @classmethod
-    def _extract_arguments(cls, match_text: str, tool_name: str) -> Optional[Dict]:
+    def _extract_arguments(cls, match_text: str, tool_name: str) -> Optional[dict]:
         """Extract arguments from matched text"""
 
         # Try to find JSON object
-        json_match = re.search(
-            r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", match_text, re.DOTALL
-        )
+        json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", match_text, re.DOTALL)
         if json_match:
             try:
                 args = json.loads(json_match.group(0))
@@ -125,17 +123,13 @@ class ToolParser:
             return "workspace/"
         path = path.strip()
         # Don't modify absolute paths or paths that already have workspace/
-        if (
-            path.startswith("workspace/")
-            or path.startswith("/")
-            or path.startswith("\\")
-        ):
+        if path.startswith("workspace/") or path.startswith("/") or path.startswith("\\"):
             return path
         # Add workspace/ prefix
         return f"workspace/{path}"
 
     @classmethod
-    def _fallback_extraction(cls, text: str, tool_name: str) -> Optional[Dict]:
+    def _fallback_extraction(cls, text: str, tool_name: str) -> Optional[dict]:
         """Extract arguments using regex when JSON parsing fails"""
 
         if tool_name == "create_file":
@@ -152,9 +146,7 @@ class ToolParser:
         elif tool_name in ["read_file", "update_file", "delete_file"]:
             path_match = re.search(r'["\']?path["\']?\s*:\s*["\']([^"\']+)["\']', text)
             if path_match:
-                args: Dict[str, Any] = {
-                    "path": cls._normalize_path(path_match.group(1))
-                }
+                args: dict[str, Any] = {"path": cls._normalize_path(path_match.group(1))}
                 if tool_name == "read_file":
                     start_match = re.search(r'["\']?start_line["\']?\s*:\s*(\d+)', text)
                     end_match = re.search(r'["\']?end_line["\']?\s*:\s*(-?\d+)', text)
@@ -177,9 +169,7 @@ class ToolParser:
             return {"path": path_match.group(1) if path_match else "."}
 
         elif tool_name == "execute_command":
-            cmd_match = re.search(
-                r'["\']?command["\']?\s*:\s*["\']([^"\']+)["\']', text
-            )
+            cmd_match = re.search(r'["\']?command["\']?\s*:\s*["\']([^"\']+)["\']', text)
             if cmd_match:
                 return {"command": cmd_match.group(1)}
 
@@ -233,7 +223,7 @@ class UniversalToolExecutor:
     def __init__(self, execute_tool_func):
         self.execute_tool = execute_tool_func
 
-    def process_response(self, text: str) -> Tuple[str, List[Dict]]:
+    def process_response(self, text: str) -> tuple[str, list[dict]]:
         """
         Process AI response: parse tools, execute them, return results
 
@@ -251,9 +241,7 @@ class UniversalToolExecutor:
 
             # Execute the tool
             result = execute_tool(tool_name, arguments)
-            results.append(
-                {"tool": tool_name, "arguments": arguments, "result": result}
-            )
+            results.append({"tool": tool_name, "arguments": arguments, "result": result})
 
             # Print execution status (use ASCII-safe characters for Windows)
             if result.get("success"):
