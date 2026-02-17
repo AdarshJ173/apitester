@@ -1,21 +1,32 @@
+"""
+Universal API Tester with AI Agent Capabilities
+Fixed: Tool message formatting for OpenAI/Groq
+"""
 import time
 import threading
+import json
+import os
 from typing import Dict, List, Optional
+from collections import deque
 
 import requests
 import questionary
 from rich.console import Console
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.table import Table
+from rich import box
+
+from config import ensure_directories
+from agent_tools import execute_tool, TOOLS_DEFINITIONS
 
 console = Console()
+ensure_directories()
 
 
 class Spinner:
-    """Thread-safe spinner animation."""
-
-    def __init__(self, message: str = "Waiting"):
+    """Thread-safe spinner"""
+    def __init__(self, message: str = "Processing"):
         self.message = message
         self._running = False
         self._thread = None
@@ -28,12 +39,7 @@ class Spinner:
             with self._lock:
                 if not self._running:
                     break
-            frame = frames[i % len(frames)]
-            console.print(
-                f"[dim]{frame} {self.message}...[/dim]",
-                end="\r",
-                highlight=False,
-            )
+            console.print(f"[dim]{frames[i % len(frames)]} {self.message}...[/dim]", end="\r")
             time.sleep(0.08)
             i += 1
         console.print(" " * 100, end="\r")
@@ -54,33 +60,92 @@ class Spinner:
         console.print(" " * 100, end="\r")
 
 
-class APITester:
+class ConversationManager:
+    """Conversation history with context memory"""
+    def __init__(self, max_messages: int = 20):
+        self.messages: deque = deque(maxlen=max_messages)
+        self._pending_context: List[Dict] = []  # Context messages queued during tool cycles
+        self.system_prompt = """You are a helpful AI assistant with access to file system tools.
+
+You can create, read, update, and delete files, list directories, and execute safe commands.
+
+IMPORTANT: Always use relative paths (e.g., 'workspace/test.txt' or 'test.py'). The current directory is the project root.
+
+When you read files, their content becomes part of your context - reference it in responses."""
+
+    def add_message(self, role: str, content: str, **kwargs):
+        """Add message with optional extra fields"""
+        msg = {"role": role, "content": content}
+        msg.update(kwargs)
+        self.messages.append(msg)
+
+    def inject_file_context(self, file_path: str, content: str):
+        """Queue file context to be added after the tool cycle completes.
+        
+        CRITICAL: We must NOT insert system messages between an assistant
+        message with tool_calls and the corresponding tool result messages.
+        The OpenAI/Groq API requires tool results to immediately follow
+        the assistant tool_calls message.
+        """
+        context_msg = {"role": "system", "content": f"[File Context: {file_path}]\n{content}"}
+        self._pending_context.append(context_msg)
+
+    def flush_pending_context(self):
+        """Add any queued file context messages to the conversation.
+        Call this AFTER the entire tool cycle is complete."""
+        for msg in self._pending_context:
+            self.messages.append(msg)
+        self._pending_context.clear()
+
+    def get_messages(self) -> List[Dict]:
+        """Build properly formatted message list for the API.
+        
+        Ensures:
+        - System prompt is always first
+        - tool messages always have tool_call_id
+        - assistant messages with tool_calls have proper structure
+        - No system messages break the tool call chain
+        """
+        result = [{"role": "system", "content": self.system_prompt}]
+        for msg in self.messages:
+            clean_msg = dict(msg)  # Copy to avoid mutating stored messages
+            result.append(clean_msg)
+        return result
+
+    def clear(self):
+        self.messages.clear()
+        self._pending_context.clear()
+
+
+class AIAgent:
     def __init__(self):
         self.api_key: Optional[str] = None
         self.service: Optional[str] = None
         self.current_model: Optional[str] = None
-        self._cached_models: Dict[str, List[str]] = {}
+        self.conversation = ConversationManager()
+        self._model_cache: Dict[str, List[str]] = {}
 
         self.services: Dict[str, Dict] = {
-            "nvidia": {
-                "label": "NVIDIA",
-                "base_url": "https://integrate.api.nvidia.com/v1",
+            "openai": {
+                "label": "OpenAI",
+                "base_url": "https://api.openai.com/v1",
                 "models_endpoint": "/models",
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
+                "supports_tools": True,
                 "style": "openai",
-                "key_example": "nvapi-...",
             },
-            "openrouter": {
-                "label": "OpenRouter",
-                "base_url": "https://openrouter.ai/api/v1",
-                "models_endpoint": "/models",
-                "chat_endpoint": "/chat/completions",
-                "auth_header": "Authorization",
-                "auth_prefix": "Bearer",
-                "style": "openai",
-                "key_example": "sk-or-...",
+            "anthropic": {
+                "label": "Anthropic (Claude)",
+                "base_url": "https://api.anthropic.com/v1",
+                "models_endpoint": None,
+                "chat_endpoint": "/messages",
+                "auth_header": "x-api-key",
+                "auth_prefix": None,
+                "supports_tools": True,
+                "style": "anthropic",
+                "models": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
             },
             "groq": {
                 "label": "Groq",
@@ -89,33 +154,28 @@ class APITester:
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
+                "supports_tools": True,
                 "style": "openai",
-                "key_example": "gsk_...",
             },
-            "openai": {
-                "label": "OpenAI",
-                "base_url": "https://api.openai.com/v1",
+            "openrouter": {
+                "label": "OpenRouter",
+                "base_url": "https://openrouter.ai/api/v1",
                 "models_endpoint": "/models",
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
+                "supports_tools": True,
                 "style": "openai",
-                "key_example": "sk-...",
             },
-            "anthropic": {
-                "label": "Anthropic",
-                "base_url": "https://api.anthropic.com/v1",
-                "models_endpoint": None,
-                "chat_endpoint": "/messages",
-                "auth_header": "x-api-key",
-                "auth_prefix": None,
-                "style": "anthropic",
-                "key_example": "sk-ant-...",
-                "models": [
-                    "claude-3-5-sonnet-20241022",
-                    "claude-3-5-haiku-20241022",
-                    "claude-3-opus-20240229",
-                ],
+            "nvidia": {
+                "label": "NVIDIA",
+                "base_url": "https://integrate.api.nvidia.com/v1",
+                "models_endpoint": "/models",
+                "chat_endpoint": "/chat/completions",
+                "auth_header": "Authorization",
+                "auth_prefix": "Bearer",
+                "supports_tools": False,
+                "style": "openai",
             },
             "together": {
                 "label": "Together AI",
@@ -124,8 +184,8 @@ class APITester:
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
+                "supports_tools": False,
                 "style": "openai",
-                "key_example": "tg-... or ...",
             },
             "mistral": {
                 "label": "Mistral AI",
@@ -134,8 +194,8 @@ class APITester:
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
+                "supports_tools": False,
                 "style": "openai",
-                "key_example": "...",
             },
             "cohere": {
                 "label": "Cohere",
@@ -144,13 +204,9 @@ class APITester:
                 "chat_endpoint": "/chat",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
+                "supports_tools": False,
                 "style": "cohere",
-                "key_example": "...",
-                "models": [
-                    "command-r-plus",
-                    "command-r",
-                    "command-light",
-                ],
+                "models": ["command-r-plus", "command-r", "command-light"],
             },
         }
 
@@ -159,23 +215,27 @@ class APITester:
         auth_header = config["auth_header"]
         prefix = config.get("auth_prefix")
         auth_value = f"{prefix} {self.api_key}" if prefix else self.api_key
-
         headers = {auth_header: auth_value, "content-type": "application/json"}
         if service == "anthropic":
             headers["anthropic-version"] = "2023-06-01"
-
         return headers
 
     def select_provider(self) -> Optional[str]:
-        choices = [
-            questionary.Choice(title=f"{cfg['label']}", value=key)
-            for key, cfg in self.services.items()
-        ]
+        choices = []
+        for key, cfg in self.services.items():
+            tools_indicator = "🔧 Tools" if cfg.get("supports_tools") else "💬 Chat Only"
+            choices.append(
+                questionary.Choice(
+                    title=f"{cfg['label']:<20} [{tools_indicator}]",
+                    value=key
+                )
+            )
+
         try:
             return questionary.select(
-                "Select provider",
+                "Select AI provider",
                 choices=choices,
-                qmark="🌐",
+                qmark="🤖",
                 pointer="➤",
             ).ask()
         except (KeyboardInterrupt, EOFError):
@@ -183,28 +243,27 @@ class APITester:
 
     def ask_api_key(self, provider: str) -> Optional[str]:
         config = self.services[provider]
-        hint = config.get("key_example", "")
-        prompt_text = f"[bold]Enter API key for {config['label']}[/bold]"
-        if hint:
-            prompt_text += f" [dim]({hint})[/dim]"
-
+        
+        # Check environment variable first
+        env_var = f"{provider.upper()}_API_KEY"
+        if os.environ.get(env_var):
+            return os.environ.get(env_var)
+            
         try:
-            key = Prompt.ask(prompt_text).strip()
+            key = Prompt.ask(f"[bold]Enter API key for {config['label']}[/bold]").strip()
             return key if key else None
         except (KeyboardInterrupt, EOFError):
             return None
 
     def fetch_models(self, service: str, use_cache: bool = True) -> List[str]:
-        """Fetch models with caching and retry logic."""
-        if use_cache and service in self._cached_models:
-            return self._cached_models[service]
+        if use_cache and service in self._model_cache:
+            return self._model_cache[service]
 
         config = self.services[service]
 
-        # Static models
         if config.get("models"):
             models = config["models"]
-            self._cached_models[service] = models
+            self._model_cache[service] = models
             return models
 
         if not config.get("models_endpoint"):
@@ -213,63 +272,53 @@ class APITester:
         url = config["base_url"] + config["models_endpoint"]
         headers = self.get_headers(service)
 
-        # Retry logic
-        for attempt in range(3):
-            try:
-                resp = requests.get(url, headers=headers, timeout=10)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    models: List[str] = []
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                models: List[str] = []
 
-                    if isinstance(data, dict) and "data" in data:
-                        for m in data["data"]:
-                            if isinstance(m, dict) and m.get("id"):
-                                models.append(m["id"])
-                    elif isinstance(data, list):
-                        for m in data:
-                            if isinstance(m, dict) and m.get("id"):
-                                models.append(m["id"])
+                if isinstance(data, dict) and "data" in data:
+                    for m in data["data"]:
+                        if isinstance(m, dict) and m.get("id"):
+                            models.append(m["id"])
+                elif isinstance(data, list):
+                    for m in data:
+                        if isinstance(m, dict) and m.get("id"):
+                            models.append(m["id"])
 
-                    if models:
-                        self._cached_models[service] = models
-                        return models
-                    else:
-                        console.print("[yellow]⚠ No models found in response[/yellow]")
-                        return []
+                if service == "groq":
+                    # Filter for chat models, excluding guard models
+                    chat_models = [
+                        m for m in models 
+                        if any(x in m.lower() for x in ["llama", "mixtral", "gemma", "deepseek"])
+                        and "guard" not in m.lower()
+                    ]
+                    
+                    if chat_models:
+                        # Prioritize higher capability models
+                        def model_priority(name):
+                            name_lower = name.lower()
+                            if "llama-3.3-70b" in name_lower: return 0
+                            if "llama-3.1-70b" in name_lower: return 1
+                            if "mixtral-8x7b" in name_lower: return 2
+                            if "llama-3.1-8b" in name_lower: return 3
+                            return 10
+                            
+                        chat_models.sort(key=model_priority)
+                        models = chat_models
 
-                elif resp.status_code == 401:
-                    console.print(
-                        f"[red]❌ Authentication failed (401). Invalid API key for {config['label']}.[/red]"
-                    )
-                    return []
-                elif resp.status_code == 403:
-                    console.print(
-                        f"[red]❌ Access forbidden (403). Check API key permissions.[/red]"
-                    )
-                    return []
-                else:
-                    console.print(
-                        f"[yellow]⚠ HTTP {resp.status_code}: {resp.text[:200]}[/yellow]"
-                    )
-                    if attempt < 2:
-                        time.sleep(1)
-                        continue
-                    return []
+                if models:
+                    self._model_cache[service] = models
+                    return models
 
-            except requests.exceptions.Timeout:
-                if attempt < 2:
-                    console.print(
-                        f"[yellow]⚠ Timeout, retrying... ({attempt + 1}/3)[/yellow]"
-                    )
-                    time.sleep(1)
-                else:
-                    console.print(
-                        "[red]❌ Failed to fetch models after 3 attempts (timeout)[/red]"
-                    )
-                    return []
-            except Exception as e:
-                console.print(f"[red]❌ Error fetching models: {e}[/red]")
+            elif resp.status_code == 401:
+                console.print(f"[red]❌ Authentication failed (401)[/red]")
                 return []
+
+        except Exception as e:
+            console.print(f"[yellow]⚠ Error: {e}[/yellow]")
+            return []
 
         return []
 
@@ -279,282 +328,461 @@ class APITester:
             return None
 
         try:
-            return questionary.select(
+            display_models = models[:50]
+            if len(models) > 50:
+                console.print(f"[dim]Showing first 50 of {len(models)} models[/dim]")
+
+            answer = questionary.select(
                 "Select model",
-                choices=models,
+                choices=display_models,
                 qmark="📋",
                 pointer="➤",
             ).ask()
+            return answer
         except (KeyboardInterrupt, EOFError):
             return None
 
-    def build_payload(self, prompt: str, service: str, model: str) -> Dict:
-        style = self.services[service]["style"]
-
-        if style == "anthropic":
-            return {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 2048,
-            }
-        if style == "cohere":
-            return {"model": model, "message": prompt}
-
-        return {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-        }
-
-    def extract_content(self, data: Dict, service: str) -> str:
-        style = self.services[service]["style"]
-
-        try:
-            if style == "anthropic":
-                return data["content"][0]["text"]
-            if style == "cohere":
-                return data.get("text") or data.get("message") or str(data)
-            return data["choices"][0]["message"]["content"]
-        except Exception:
-            return str(data)
-
-    def send_message(self, prompt: str, service: str, model: str) -> None:
-        config = self.services[service]
+    def send_simple_message(self, user_message: str) -> Optional[str]:
+        """Send message without tool support"""
+        config = self.services[self.service]
         url = config["base_url"] + config["chat_endpoint"]
-        headers = self.get_headers(service)
-        payload = self.build_payload(prompt, service, model)
+        headers = self.get_headers(self.service)
 
-        spinner = Spinner("Generating reply")
+        self.conversation.add_message("user", user_message)
+
+        spinner = Spinner("AI is thinking")
         spinner.start()
         start = time.perf_counter()
 
         try:
+            if self.service == "anthropic":
+                payload = {
+                    "model": self.current_model,
+                    "max_tokens": 4096,
+                    "messages": [m for m in self.conversation.get_messages() if m["role"] != "system"],
+                    "system": self.conversation.system_prompt,
+                }
+            elif self.service == "cohere":
+                payload = {
+                    "model": self.current_model,
+                    "message": user_message,
+                }
+            else:
+                payload = {
+                    "model": self.current_model,
+                    "messages": self.conversation.get_messages(),
+                }
+
             resp = requests.post(url, headers=headers, json=payload, timeout=120)
             elapsed = time.perf_counter() - start
             spinner.stop()
 
-            latency_ms = int(elapsed * 1000)
-            latency_s = f"{elapsed:.3f}"
-
             if resp.status_code == 200:
                 data = resp.json()
-                content = self.extract_content(data, service)
-                console.print(
-                    Panel(
-                        content,
-                        title="[bold green]✓ Response[/bold green]",
-                        subtitle=f"[dim]{latency_s}s ({latency_ms}ms)[/dim]",
-                        border_style="green",
-                    )
-                )
+
+                if self.service == "anthropic":
+                    content = data["content"][0]["text"]
+                elif self.service == "cohere":
+                    content = data.get("text") or data.get("message") or str(data)
+                else:
+                    content = data["choices"][0]["message"]["content"]
+
+                self.conversation.add_message("assistant", content)
+                return f"{content}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed*1000)}ms)[/dim]"
             else:
                 try:
-                    err_data = resp.json()
-                    msg = err_data.get("error", {}).get("message", resp.text)
-                except Exception:
-                    msg = resp.text[:500]
-
-                console.print(
-                    Panel(
-                        f"[red]HTTP {resp.status_code}[/red]\n{msg}\n\n"
-                        f"[dim]Latency: {latency_s}s[/dim]",
-                        title="[bold red]❌ Error[/bold red]",
-                        border_style="red",
-                    )
-                )
-                
-                # Suggestions
-                if resp.status_code == 401:
-                    console.print("[yellow]💡 Tip: Check your API key with /key[/yellow]")
-                elif resp.status_code == 404:
-                    console.print("[yellow]💡 Tip: Try a different model with /model[/yellow]")
+                    err = resp.json().get("error", {}).get("message", resp.text)
+                except:
+                    err = resp.text[:300]
+                return f"❌ Error ({resp.status_code}): {err}"
 
         except requests.exceptions.Timeout:
             spinner.stop()
-            console.print(
-                "[red]❌ Request timed out (120s). Model may be unavailable.[/red]\n"
-                "[yellow]💡 Try: /model to select a different model[/yellow]"
-            )
-        except requests.exceptions.ConnectionError:
-            spinner.stop()
-            console.print("[red]❌ Connection error. Check your internet.[/red]")
+            return "❌ Request timed out (120s)"
         except Exception as e:
             spinner.stop()
-            console.print(f"[red]❌ Error: {e}[/red]")
+            return f"❌ Error: {e}"
+
+    def _sanitize_messages_for_api(self, messages: List[Dict]) -> List[Dict]:
+        """Sanitize messages to ensure proper format for OpenAI-style APIs.
+        
+        Rules enforced:
+        1. Every 'tool' role message MUST have a 'tool_call_id' field
+        2. Tool messages must follow an assistant message that has 'tool_calls'
+        3. No system messages between assistant tool_calls and tool results
+        4. Remove orphaned tool messages that lack proper context
+        """
+        sanitized = []
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            role = msg.get("role")
+            
+            if role == "assistant" and msg.get("tool_calls"):
+                # Add the assistant message with tool_calls
+                sanitized.append(msg)
+                i += 1
+                
+                # Collect all subsequent tool messages first, defer system messages
+                deferred_system = []
+                while i < len(messages):
+                    next_msg = messages[i]
+                    if next_msg.get("role") == "tool":
+                        if next_msg.get("tool_call_id"):
+                            sanitized.append(next_msg)
+                        # Skip tool messages without tool_call_id (broken)
+                        i += 1
+                    elif next_msg.get("role") == "system":
+                        # Defer system messages until after ALL tool messages
+                        deferred_system.append(next_msg)
+                        i += 1
+                    else:
+                        break
+                # Now add any deferred system messages AFTER all tool results
+                sanitized.extend(deferred_system)
+            elif role == "tool":
+                # Orphaned tool message (no preceding assistant with tool_calls)
+                # Skip it to prevent API errors
+                i += 1
+            else:
+                sanitized.append(msg)
+                i += 1
+        
+        return sanitized
+
+    def call_ai_with_tools(self, user_message: str) -> Optional[str]:
+        """Call AI with tool support - handles tool message formatting correctly."""
+        config = self.services[self.service]
+        url = config["base_url"] + config["chat_endpoint"]
+        headers = self.get_headers(self.service)
+
+        self.conversation.add_message("user", user_message)
+
+        spinner = Spinner("AI is thinking")
+        spinner.start()
+        start = time.perf_counter()
+
+        max_iterations = 5
+        iteration = 0
+
+        try:
+            while iteration < max_iterations:
+                iteration += 1
+
+                if self.service == "anthropic":
+                    # Anthropic: filter system messages out, pass as top-level param
+                    api_messages = [m for m in self.conversation.get_messages() if m["role"] != "system"]
+                    payload = {
+                        "model": self.current_model,
+                        "max_tokens": 4096,
+                        "messages": api_messages,
+                        "system": self.conversation.system_prompt,
+                        "tools": TOOLS_DEFINITIONS,
+                    }
+                else:
+                    # OpenAI-style: sanitize messages to fix tool chain ordering
+                    api_messages = self._sanitize_messages_for_api(self.conversation.get_messages())
+                    payload = {
+                        "model": self.current_model,
+                        "messages": api_messages,
+                        "tools": TOOLS_DEFINITIONS,
+                        "tool_choice": "auto",
+                    }
+
+                resp = requests.post(url, headers=headers, json=payload, timeout=120)
+
+                if resp.status_code != 200:
+                    spinner.stop()
+                    try:
+                        err_data = resp.json()
+                        err = err_data.get("error", {}).get("message", resp.text)
+                    except Exception:
+                        err = resp.text[:300]
+                    
+                    # If the error is about tool calling not being supported by the model,
+                    # fall back to simple message mode
+                    err_lower = str(err).lower()
+                    if resp.status_code == 400 and ("tool" in err_lower and ("not supported" in err_lower or "not available" in err_lower)):
+                        # Remove the user message we just added (it will be re-added by send_simple_message)
+                        if self.conversation.messages and self.conversation.messages[-1].get("role") == "user":
+                            self.conversation.messages.pop()
+                        return self.send_simple_message(user_message)
+                    
+                    return f"❌ Error ({resp.status_code}): {err}"
+
+                data = resp.json()
+
+                if self.service == "anthropic":
+                    content_blocks = data.get("content", [])
+                    tool_uses = [b for b in content_blocks if b.get("type") == "tool_use"]
+
+                    if tool_uses:
+                        spinner.stop()
+                        for tool_use in tool_uses:
+                            tool_name = tool_use["name"]
+                            tool_args = tool_use["input"]
+
+                            console.print(f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]")
+                            result = execute_tool(tool_name, tool_args)
+
+                            if result.get("success"):
+                                console.print(f"[green]✓ {tool_name}[/green]")
+                                if tool_name == "read_file" and "content" in result:
+                                    # self.conversation.inject_file_context(result["path"], result["content"])
+                                    pass
+                            else:
+                                console.print(f"[red]✗ {tool_name}: {result.get('error')}[/red]")
+
+                            self.conversation.add_message("user", json.dumps({
+                                "type": "tool_result",
+                                "tool_use_id": tool_use["id"],
+                                "content": json.dumps(result)
+                            }))
+
+                        # Flush any pending file context AFTER all tool results are added
+                        self.conversation.flush_pending_context()
+                        spinner.start()
+                        continue
+
+                    text_blocks = [b["text"] for b in content_blocks if b.get("type") == "text"]
+                    if text_blocks:
+                        response_text = "\n".join(text_blocks)
+                        self.conversation.flush_pending_context()
+                        self.conversation.add_message("assistant", response_text)
+                        spinner.stop()
+                        elapsed = time.perf_counter() - start
+                        return f"{response_text}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed*1000)}ms)[/dim]"
+
+                else:  # OpenAI-style (Groq, OpenAI, OpenRouter)
+                    choice = data["choices"][0]
+                    message = choice["message"]
+
+                    if message.get("tool_calls"):
+                        spinner.stop()
+
+                        # First, add the assistant message with tool_calls
+                        # Include content only if present (some APIs send null)
+                        assistant_content = message.get("content") or ""
+                        self.conversation.add_message(
+                            "assistant",
+                            assistant_content,
+                            tool_calls=message["tool_calls"]
+                        )
+
+                        # Execute ALL tools and add ALL tool responses BEFORE doing anything else
+                        for tool_call in message["tool_calls"]:
+                            func = tool_call.get("function", {})
+                            tool_name = func.get("name", "unknown")
+                            tool_call_id = tool_call.get("id", "")
+                            
+                            try:
+                                tool_args = json.loads(func.get("arguments", "{}"))
+                            except json.JSONDecodeError:
+                                tool_args = {}
+
+                            console.print(f"[dim]🔧 {tool_name}({json.dumps(tool_args)})[/dim]")
+                            result = execute_tool(tool_name, tool_args)
+
+                            if result.get("success"):
+                                console.print(f"[green]✓ {tool_name}[/green]")
+                                # For read_file, we need to make sure the model actually Sees the content.
+                                # Instead of system messages (which can break tool chains), we'll rely on the 
+                                # tool output itself being part of the conversation history.
+                                # The 'content' field in the tool output JSON is what the model sees.
+                                pass
+                            else:
+                                console.print(f"[red]✗ {tool_name}: {result.get('error')}[/red]")
+
+                            # Add tool result message with REQUIRED tool_call_id
+                            # Add tool result message with REQUIRED tool_call_id
+                            content_str = json.dumps(result)
+                            self.conversation.add_message(
+                                "tool",
+                                content_str,
+                                tool_call_id=tool_call_id,
+                                name=tool_name
+                            )
+
+                        # NOW flush pending file context (after ALL tool results are in place)
+                        self.conversation.flush_pending_context()
+
+                        spinner.start()
+                        continue
+
+                    # No tool calls — regular text response
+                    response_text = message.get("content", "")
+                    if response_text:
+                        self.conversation.flush_pending_context()
+                        self.conversation.add_message("assistant", response_text)
+                        spinner.stop()
+                        elapsed = time.perf_counter() - start
+                        return f"{response_text}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed*1000)}ms)[/dim]"
+
+                spinner.stop()
+                return str(data)
+
+            spinner.stop()
+            return "⚠ Max iterations reached"
+
+        except requests.exceptions.Timeout:
+            spinner.stop()
+            return "❌ Request timed out (120s)"
+        except json.JSONDecodeError as e:
+            spinner.stop()
+            return f"❌ Invalid JSON in tool arguments: {e}"
+        except json.JSONDecodeError as e:
+            spinner.stop()
+            return f"❌ Invalid JSON in tool arguments: {e}"
+        except requests.exceptions.ConnectionError as e:
+            spinner.stop()
+            if "10013" in str(e):
+                 return f"❌ Network access denied (WinError 10013). Check your firewall, antivirus, or VPN settings."
+            return f"❌ Connection error: {e}"
+        except Exception as e:
+            spinner.stop()
+            return f"❌ Error: {e}"
 
     def show_config(self):
-        """Display current configuration."""
-        table = Table(title="Current Configuration", show_header=True)
+        table = Table(title="🔧 Configuration", box=box.ROUNDED)
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="green")
 
         if self.service:
-            table.add_row("Provider", self.services[self.service]["label"])
-        else:
-            table.add_row("Provider", "[dim]Not set[/dim]")
-
-        if self.api_key:
-            masked = self.api_key[:8] + "..." + self.api_key[-4:] if len(self.api_key) > 12 else "***"
-            table.add_row("API Key", masked)
-        else:
-            table.add_row("API Key", "[dim]Not set[/dim]")
-
+            cfg = self.services[self.service]
+            table.add_row("Provider", cfg["label"])
+            table.add_row("Tools Support", "✅ Yes" if cfg.get("supports_tools") else "❌ No")
         if self.current_model:
             table.add_row("Model", self.current_model)
-        else:
-            table.add_row("Model", "[dim]Not set[/dim]")
+        if self.api_key:
+            masked = self.api_key[:8] + "..." + self.api_key[-4:]
+            table.add_row("API Key", masked)
+
+        table.add_row("Context Messages", str(len(self.conversation.messages)))
 
         console.print(table)
 
     def setup(self) -> bool:
         console.clear()
-        console.print(
-            Panel.fit(
-                "[bold cyan]🚀 Universal API Tester[/bold cyan]\n"
-                "[dim]Commands: /provider, /key, /model, /, /config, exit[/dim]",
-                border_style="cyan",
-            )
-        )
+        console.print(Panel.fit(
+            "[bold cyan]🤖 AI Agent with Secure CRUD Operations[/bold cyan]\n"
+            "[dim]File operations • Command execution • Context memory[/dim]\n"
+            "[yellow]Commands: /config, /provider, /key, /model, /clear, exit[/yellow]",
+            border_style="cyan",
+            box=box.DOUBLE,
+        ))
 
-        # Select provider
         provider = self.select_provider()
         if not provider:
-            console.print("[red]❌ Setup cancelled[/red]")
             return False
 
         self.service = provider
-        console.print(
-            f"[green]✓ Provider:[/green] [bold]{self.services[provider]['label']}[/bold]"
-        )
+        cfg = self.services[provider]
+        tools_status = "with tool support" if cfg.get("supports_tools") else "(chat only, no tools)"
+        console.print(f"[green]✓[/green] Provider: [bold]{cfg['label']}[/bold] [dim]{tools_status}[/dim]")
 
-        # Get API key
         api_key = self.ask_api_key(provider)
         if not api_key:
-            console.print("[red]❌ API key required[/red]")
             return False
 
         self.api_key = api_key
-        console.print("[green]✓ API key saved[/green]")
+        console.print("[green]✓[/green] API key configured")
 
-        # Fetch models
         console.print("[dim]Fetching models...[/dim]")
         models = self.fetch_models(self.service, use_cache=False)
 
         if not models:
-            console.print(
-                "[yellow]⚠ Could not fetch models. You can still try manually entering a model.[/yellow]"
-            )
-            manual = Prompt.ask(
-                "[bold]Enter model name manually (or press Enter to retry setup)[/bold]"
-            ).strip()
+            console.print("[yellow]⚠ Could not fetch models[/yellow]")
+            manual = Prompt.ask("[bold]Enter model name manually[/bold]", default="").strip()
             if manual:
                 self.current_model = manual
-                console.print(f"[green]✓ Using model:[/green] [cyan]{manual}[/cyan]\n")
+                console.print(f"[green]✓[/green] Model: [cyan]{manual}[/cyan]\n")
                 return True
             return False
 
         self.current_model = models[0]
-        console.print(
-            f"[green]✓ Found {len(models)} models[/green]\n"
-            f"[dim]Default:[/dim] [cyan]{self.current_model}[/cyan]\n"
-        )
+        console.print(f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan] [dim]({len(models)} available)[/dim]\n")
         return True
 
     def command_provider(self):
-        """Switch provider and get new API key."""
         provider = self.select_provider()
         if not provider:
             return
 
-        # Ask for new API key for this provider
         api_key = self.ask_api_key(provider)
         if not api_key:
-            console.print("[yellow]⚠ Provider change cancelled - no API key provided[/yellow]")
+            console.print("[yellow]⚠ Cancelled[/yellow]")
             return
 
         self.service = provider
         self.api_key = api_key
-        self._cached_models.clear()  # Clear cache
+        self._model_cache.clear()
+        self.conversation.clear()
 
-        console.print(
-            f"[green]✓ Provider:[/green] [bold]{self.services[provider]['label']}[/bold]"
-        )
+        cfg = self.services[provider]
+        console.print(f"[green]✓[/green] Provider: [bold]{cfg['label']}[/bold]")
 
         console.print("[dim]Fetching models...[/dim]")
         models = self.fetch_models(self.service, use_cache=False)
 
         if not models:
-            console.print("[yellow]⚠ Could not fetch models with this key[/yellow]")
+            console.print("[yellow]⚠ Could not fetch models[/yellow]")
             self.current_model = None
             return
 
         self.current_model = models[0]
-        console.print(
-            f"[green]✓ Loaded {len(models)} models[/green]\n"
-            f"[dim]Default:[/dim] [cyan]{self.current_model}[/cyan]\n"
-        )
-
-    def command_key(self):
-        """Update API key for current provider."""
-        if not self.service:
-            console.print("[red]❌ No provider selected[/red]")
-            return
-
-        api_key = self.ask_api_key(self.service)
-        if not api_key:
-            console.print("[yellow]⚠ API key not changed[/yellow]")
-            return
-
-        self.api_key = api_key
-        self._cached_models.pop(self.service, None)  # Clear cache for this service
-
-        console.print("[green]✓ API key updated[/green]")
-
-        # Re-fetch models
-        console.print("[dim]Fetching models...[/dim]")
-        models = self.fetch_models(self.service, use_cache=False)
-        if models:
-            self.current_model = models[0]
-            console.print(
-                f"[green]✓ Loaded {len(models)} models[/green]\n"
-                f"[dim]Default:[/dim] [cyan]{self.current_model}[/cyan]\n"
-            )
-        else:
-            console.print("[yellow]⚠ Could not fetch models with new key[/yellow]")
+        console.print(f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan]\n")
 
     def command_model(self):
         if not self.service:
             console.print("[red]❌ No provider selected[/red]")
             return
 
+        console.print("[dim]Loading models...[/dim]")
         models = self.fetch_models(self.service, use_cache=True)
+
         if not models:
-            console.print(
-                "[yellow]⚠ No models available. You can enter a model name manually.[/yellow]"
-            )
-            manual = Prompt.ask("[bold]Model name[/bold]").strip()
+            console.print("[yellow]⚠ No models available[/yellow]")
+            manual = Prompt.ask("[bold]Enter model name manually[/bold]", default="").strip()
             if manual:
                 self.current_model = manual
-                console.print(f"[green]✓ Model:[/green] [cyan]{manual}[/cyan]\n")
+                console.print(f"[green]✓[/green] Model: [cyan]{manual}[/cyan]\n")
             return
 
         selected = self.select_model(models)
         if selected:
             self.current_model = selected
-            console.print(f"[green]✓ Model:[/green] [cyan]{selected}[/cyan]\n")
+            console.print(f"[green]✓[/green] Model: [cyan]{selected}[/cyan]\n")
 
     def run(self):
         if not self.setup():
             return
 
-        console.print(
-            "[bold green]🎉 Ready![/bold green]\n"
-            "[dim]Type your message or use commands: /provider, /key, /model, /, /config, exit[/dim]\n"
-        )
+        cfg = self.services[self.service]
+        if cfg.get("supports_tools"):
+            console.print(Panel(
+                "[bold green]🎉 AI Agent Ready![/bold green]\n\n"
+                "The AI can:\n"
+                "  • Create, read, update, delete files\n"
+                "  • List directories\n"
+                "  • Execute safe commands\n"
+                "  • Remember context from files\n\n"
+                "[dim]Try: 'Create a file called workspace/hello.txt with greeting'[/dim]",
+                border_style="green",
+                box=box.ROUNDED
+            ))
+        else:
+            console.print(Panel(
+                "[bold green]🎉 Chat Ready![/bold green]\n\n"
+                "[yellow]Note: This provider does not support tool use.[/yellow]\n"
+                "AI can chat but cannot perform file operations.\n\n"
+                "[dim]Try: 'Tell me about Python programming'[/dim]",
+                border_style="yellow",
+                box=box.ROUNDED
+            ))
 
         while True:
             try:
-                user_input = Prompt.ask("[bold]You[/bold]").strip()
+                user_input = Prompt.ask("\n[bold cyan]You[/bold cyan]").strip()
 
                 if not user_input:
                     continue
@@ -563,37 +791,57 @@ class APITester:
                     console.print("[cyan]👋 Goodbye![/cyan]")
                     break
 
-                if user_input == "/provider":
-                    self.command_provider()
+                if user_input == "/config":
+                    self.show_config()
                     continue
 
-                if user_input == "/key":
-                    self.command_key()
+                if user_input == "/clear":
+                    self.conversation.clear()
+                    console.print("[green]✓ Conversation cleared[/green]")
+                    continue
+
+                if user_input == "/provider":
+                    self.command_provider()
                     continue
 
                 if user_input in ("/model", "/"):
                     self.command_model()
                     continue
 
-                if user_input == "/config":
-                    self.show_config()
-                    print()
+                if user_input == "/key":
+                    if not self.service:
+                        console.print("[red]❌ No provider selected[/red]")
+                        continue
+                    api_key = self.ask_api_key(self.service)
+                    if api_key:
+                        self.api_key = api_key
+                        console.print("[green]✓ API key updated[/green]")
                     continue
 
                 if not self.current_model:
                     console.print("[red]❌ No model selected. Use /model[/red]")
                     continue
 
-                self.send_message(user_input, self.service, self.current_model)
-                print()
+                if cfg.get("supports_tools"):
+                    response = self.call_ai_with_tools(user_input)
+                else:
+                    response = self.send_simple_message(user_input)
+
+                if response:
+                    console.print(Panel(
+                        response,
+                        title="[bold]🤖 AI Agent[/bold]",
+                        border_style="blue",
+                        box=box.ROUNDED
+                    ))
 
             except (KeyboardInterrupt, EOFError):
                 console.print("\n[cyan]👋 Goodbye![/cyan]")
                 break
             except Exception as e:
-                console.print(f"[red]❌ Unexpected error: {e}[/red]")
+                console.print(f"[red]❌ Error: {e}[/red]")
 
 
 if __name__ == "__main__":
-    tester = APITester()
-    tester.run()
+    agent = AIAgent()
+    agent.run()

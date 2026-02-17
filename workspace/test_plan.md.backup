@@ -1,0 +1,5 @@
+## Testing Goals
+
+1. **Functional Testing**: Verify that the AI agent can perform CRUD operations on files and execute safe commands successfully.
+2. **Security Testing**: Test the security measures in place to prevent dangerous commands, path traversal, and unauthorized access to sensitive files and directories.
+3. **Performance Testing**: Evaluate the performance of the AI agent under various loads and scenarios to ensure it can handle multiple tasks and large files efficiently.
