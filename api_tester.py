@@ -21,6 +21,7 @@ from rich.markdown import Markdown
 
 from config import ensure_directories
 from agent_tools import execute_tool, TOOLS_DEFINITIONS
+from config_manager import config_manager
 
 console = Console()
 ensure_directories()
@@ -737,6 +738,109 @@ class AIAgent:
             )
         )
 
+        # Check for saved configurations
+        last_provider = config_manager.get_last_provider()
+        saved_providers = config_manager.get_all_saved_providers()
+
+        if saved_providers:
+            # Show recommendation menu
+            choices = []
+
+            # Add last used as first option with star
+            if last_provider and last_provider in saved_providers:
+                last_cfg = saved_providers[last_provider]
+                provider_label = self.services[last_provider]["label"]
+                masked_key = (
+                    last_cfg.api_key[:8] + "..." + last_cfg.api_key[-4:]
+                    if len(last_cfg.api_key) > 12
+                    else "***"
+                )
+                choices.append(
+                    questionary.Choice(
+                        title=f"⭐ Last Used: {provider_label} ({last_cfg.model}) [Key: {masked_key}]",
+                        value={
+                            "type": "saved",
+                            "provider": last_provider,
+                            "config": last_cfg,
+                        },
+                    )
+                )
+
+            # Add other saved providers
+            for provider_name, provider_cfg in saved_providers.items():
+                if provider_name != last_provider:
+                    provider_label = self.services[provider_name]["label"]
+                    masked_key = (
+                        provider_cfg.api_key[:8] + "..." + provider_cfg.api_key[-4:]
+                        if len(provider_cfg.api_key) > 12
+                        else "***"
+                    )
+                    choices.append(
+                        questionary.Choice(
+                            title=f"💾 {provider_label} ({provider_cfg.model}) [Key: {masked_key}]",
+                            value={
+                                "type": "saved",
+                                "provider": provider_name,
+                                "config": provider_cfg,
+                            },
+                        )
+                    )
+
+            # Add option for new configuration
+            choices.append(questionary.Separator())
+            choices.append(
+                questionary.Choice(
+                    title="➕ Configure New Provider", value={"type": "new"}
+                )
+            )
+
+            try:
+                selection = questionary.select(
+                    "Select configuration (use saved or create new)",
+                    choices=choices,
+                    qmark="🤖",
+                    pointer="➤",
+                ).ask()
+
+                if not selection:
+                    return False
+
+                if selection["type"] == "saved":
+                    # Use saved configuration
+                    provider = selection["provider"]
+                    provider_cfg = selection["config"]
+
+                    self.service = provider
+                    self.api_key = provider_cfg.api_key
+                    self.current_model = provider_cfg.model
+
+                    cfg = self.services[provider]
+                    tools_status = (
+                        "with tool support"
+                        if cfg.get("supports_tools")
+                        else "(chat only, no tools)"
+                    )
+                    console.print(
+                        f"[green]✓[/green] Provider: [bold]{cfg['label']}[/bold] [dim]{tools_status}[/dim]"
+                    )
+                    console.print(
+                        "[green]✓[/green] API key loaded from saved configuration"
+                    )
+                    console.print(
+                        f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan]\n"
+                    )
+
+                    # Update last used timestamp
+                    if self.api_key and self.current_model:
+                        config_manager.set_provider_config(
+                            provider, self.api_key, self.current_model
+                        )
+                    return True
+
+            except (KeyboardInterrupt, EOFError):
+                return False
+
+        # No saved config or user chose new - proceed with normal setup
         provider = self.select_provider()
         if not provider:
             return False
@@ -770,6 +874,8 @@ class AIAgent:
             if manual:
                 self.current_model = manual
                 console.print(f"[green]✓[/green] Model: [cyan]{manual}[/cyan]\n")
+                # Save configuration
+                config_manager.set_provider_config(provider, api_key, manual)
                 return True
             return False
 
@@ -777,6 +883,9 @@ class AIAgent:
         console.print(
             f"[green]✓[/green] Model: [cyan]{self.current_model}[/cyan] [dim]({len(models)} available)[/dim]\n"
         )
+
+        # Save configuration for future use
+        config_manager.set_provider_config(provider, api_key, self.current_model)
         return True
 
     def command_provider(self):

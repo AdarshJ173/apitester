@@ -27,6 +27,9 @@ workspace/*.txt
 workspace/*.backup
 test_plan.txt
 
+# Configuration files with sensitive data (API keys)
+.ai_agent_config.json
+
 # OS
 .DS_Store
 Thumbs.db
