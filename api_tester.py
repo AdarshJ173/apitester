@@ -160,6 +160,7 @@ class AIAgent:
                 "auth_prefix": "Bearer",
                 "supports_tools": True,
                 "style": "openai",
+                "tool_mode": "text",
             },
             "anthropic": {
                 "label": "Anthropic (Claude)",
@@ -175,6 +176,7 @@ class AIAgent:
                     "claude-3-5-haiku-20241022",
                     "claude-3-opus-20240229",
                 ],
+                "tool_mode": "text",
             },
             "groq": {
                 "label": "Groq",
@@ -185,6 +187,7 @@ class AIAgent:
                 "auth_prefix": "Bearer",
                 "supports_tools": True,
                 "style": "openai",
+                "tool_mode": "text",
             },
             "openrouter": {
                 "label": "OpenRouter",
@@ -195,6 +198,7 @@ class AIAgent:
                 "auth_prefix": "Bearer",
                 "supports_tools": True,
                 "style": "openai",
+                "tool_mode": "text",
             },
             "nvidia": {
                 "label": "NVIDIA",
@@ -1010,43 +1014,22 @@ class AIAgent:
 
         cfg = self.services[self.service]
 
-        # Set tool mode based on provider capabilities
-        if cfg.get("tool_mode") == "text":
-            self.conversation.set_tool_mode(True)
-            tool_mode_indicator = " (text-based tools)"
-        elif cfg.get("supports_tools"):
-            self.conversation.set_tool_mode(False)
-            tool_mode_indicator = ""
-        else:
-            tool_mode_indicator = ""
+        # All providers now use text-based tools
+        self.conversation.set_tool_mode(True)
 
-        if cfg.get("supports_tools"):
-            console.print(
-                Panel(
-                    "[bold green]🎉 AI Agent Ready![/bold green]"
-                    + tool_mode_indicator
-                    + "\n\n"
-                    "The AI can:\n"
-                    "  • Create, read, update, delete files\n"
-                    "  • List directories\n"
-                    "  • Execute safe commands\n"
-                    "  • Remember context from files\n\n"
-                    "[dim]Try: 'Create a file called workspace/hello.txt with greeting'[/dim]",
-                    border_style="green",
-                    box=box.ROUNDED,
-                )
+        console.print(
+            Panel(
+                "[bold green]🎉 AI Agent Ready![/bold green]\n\n"
+                "The AI can:\n"
+                "  • Create, read, update, delete files\n"
+                "  • List directories\n"
+                "  • Execute safe commands\n"
+                "  • Remember context from files\n\n"
+                "[dim]Try: 'Create a file called workspace/hello.txt with greeting'[/dim]",
+                border_style="green",
+                box=box.ROUNDED,
             )
-        else:
-            console.print(
-                Panel(
-                    "[bold green]🎉 Chat Ready![/bold green]\n\n"
-                    "[yellow]Note: This provider does not support tool use.[/yellow]\n"
-                    "AI can chat but cannot perform file operations.\n\n"
-                    "[dim]Try: 'Tell me about Python programming'[/dim]",
-                    border_style="yellow",
-                    box=box.ROUNDED,
-                )
-            )
+        )
 
         while True:
             try:
@@ -1090,15 +1073,8 @@ class AIAgent:
                     console.print("[red]❌ No model selected. Use /model[/red]")
                     continue
 
-                if cfg.get("tool_mode") == "text":
-                    # Text-based tool parsing (works with any provider)
-                    response = self.send_simple_message(user_input)
-                elif cfg.get("supports_tools"):
-                    # Native tool calling API
-                    response = self.call_ai_with_tools(user_input)
-                else:
-                    # No tool support - chat only
-                    response = self.send_simple_message(user_input)
+                # All providers use text-based tool parsing
+                response = self.send_simple_message(user_input)
 
                 if response:
                     # Render markdown for proper formatting (bold, italic, etc.)
