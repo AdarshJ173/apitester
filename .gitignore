@@ -4,11 +4,30 @@ __pycache__/
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Virtual Environment
 venv/
 env/
 ENV/
+.venv/
+.ENV/
 
 # IDE
 .vscode/
@@ -22,6 +41,16 @@ ENV/
 .mypy_cache/
 .pytest_cache/
 
+# Testing
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
 # Application specific
 workspace/*.txt
 workspace/*.backup
@@ -29,11 +58,41 @@ test_plan.txt
 
 # Configuration files with sensitive data (API keys)
 .ai_agent_config.json
+.env
+.env.local
+.env.*.local
 
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
 # Logs (keep directory but not log files)
 logs/*.log
 !logs/.gitkeep
+
+# Build artifacts
+*.spec
+*.manifest
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Documentation build
+docs/_build/
+site/
+
+# pyenv
+.python-version
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.orig
