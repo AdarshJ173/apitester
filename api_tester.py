@@ -22,6 +22,7 @@ from rich.markdown import Markdown
 from config import ensure_directories
 from agent_tools import execute_tool, TOOLS_DEFINITIONS
 from config_manager import config_manager
+from tool_parser import ToolParser, UniversalToolExecutor
 
 console = Console()
 ensure_directories()
@@ -74,13 +75,25 @@ class ConversationManager:
         self._pending_context: List[
             Dict
         ] = []  # Context messages queued during tool cycles
-        self.system_prompt = """You are a helpful AI assistant with access to file system tools.
+        self.use_text_tools = False
+        self.system_prompt_native = """You are a helpful AI assistant with access to file system tools.
 
 You can create, read, update, and delete files, list directories, and execute safe commands.
 
 IMPORTANT: Always use relative paths (e.g., 'workspace/test.txt' or 'test.py'). The current directory is the project root.
 
 When you read files, their content becomes part of your context - reference it in responses."""
+
+    @property
+    def system_prompt(self) -> str:
+        """Get the appropriate system prompt based on tool mode"""
+        if self.use_text_tools:
+            return ToolParser.create_tool_system_prompt()
+        return self.system_prompt_native
+
+    def set_tool_mode(self, use_text: bool):
+        """Set whether to use text-based tool parsing"""
+        self.use_text_tools = use_text
 
     def add_message(self, role: str, content: str, **kwargs):
         """Add message with optional extra fields"""
@@ -190,8 +203,9 @@ class AIAgent:
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
-                "supports_tools": False,
+                "supports_tools": True,
                 "style": "openai",
+                "tool_mode": "text",  # Uses text-based tool parsing
             },
             "together": {
                 "label": "Together AI",
@@ -200,8 +214,9 @@ class AIAgent:
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
-                "supports_tools": False,
+                "supports_tools": True,
                 "style": "openai",
+                "tool_mode": "text",  # Uses text-based tool parsing
             },
             "mistral": {
                 "label": "Mistral AI",
@@ -210,8 +225,9 @@ class AIAgent:
                 "chat_endpoint": "/chat/completions",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
-                "supports_tools": False,
+                "supports_tools": True,
                 "style": "openai",
+                "tool_mode": "text",  # Uses text-based tool parsing
             },
             "cohere": {
                 "label": "Cohere",
@@ -220,9 +236,10 @@ class AIAgent:
                 "chat_endpoint": "/chat",
                 "auth_header": "Authorization",
                 "auth_prefix": "Bearer",
-                "supports_tools": False,
+                "supports_tools": True,
                 "style": "cohere",
                 "models": ["command-r-plus", "command-r", "command-light"],
+                "tool_mode": "text",  # Uses text-based tool parsing
             },
         }
 
@@ -370,7 +387,7 @@ class AIAgent:
             return None
 
     def send_simple_message(self, user_message: str) -> Optional[str]:
-        """Send message without tool support"""
+        """Send message and optionally parse text-based tools"""
         if not self.service:
             return "❌ No provider selected"
         config = self.services[self.service]
@@ -420,8 +437,25 @@ class AIAgent:
                 else:
                     content = data["choices"][0]["message"]["content"]
 
-                self.conversation.add_message("assistant", content)
-                return f"{content}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed * 1000)}ms)[/dim]"
+                # Check if this provider uses text-based tool parsing
+                if config.get("tool_mode") == "text":
+                    # Parse and execute tools from text
+                    cleaned_content, results = UniversalToolExecutor(
+                        execute_tool
+                    ).process_response(content)
+
+                    # Add results to conversation
+                    for result in results:
+                        self.conversation.add_message(
+                            "system",
+                            f"[Tool Result: {result['tool']}]\n{json.dumps(result['result'])}",
+                        )
+
+                    self.conversation.add_message("assistant", cleaned_content)
+                    return f"{cleaned_content}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed * 1000)}ms)[/dim]"
+                else:
+                    self.conversation.add_message("assistant", content)
+                    return f"{content}\n\n[dim]⏱ {elapsed:.2f}s ({int(elapsed * 1000)}ms)[/dim]"
             else:
                 try:
                     err = resp.json().get("error", {}).get("message", resp.text)
@@ -949,10 +983,23 @@ class AIAgent:
             return
 
         cfg = self.services[self.service]
+
+        # Set tool mode based on provider capabilities
+        if cfg.get("tool_mode") == "text":
+            self.conversation.set_tool_mode(True)
+            tool_mode_indicator = " (text-based tools)"
+        elif cfg.get("supports_tools"):
+            self.conversation.set_tool_mode(False)
+            tool_mode_indicator = ""
+        else:
+            tool_mode_indicator = ""
+
         if cfg.get("supports_tools"):
             console.print(
                 Panel(
-                    "[bold green]🎉 AI Agent Ready![/bold green]\n\n"
+                    "[bold green]🎉 AI Agent Ready![/bold green]"
+                    + tool_mode_indicator
+                    + "\n\n"
                     "The AI can:\n"
                     "  • Create, read, update, delete files\n"
                     "  • List directories\n"
