@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Linters/Formatters
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Application specific
+workspace/*.txt
+workspace/*.backup
+test_plan.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs (keep directory but not log files)
+logs/*.log
+!logs/.gitkeep
