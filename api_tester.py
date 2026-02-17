@@ -418,10 +418,23 @@ class AIAgent:
                     "message": user_message,
                 }
             else:
-                payload = {
-                    "model": self.current_model,
-                    "messages": self.conversation.get_messages(),
-                }
+                # For text-based tool providers, only send user/assistant messages (no system)
+                if config.get("tool_mode") == "text":
+                    payload = {
+                        "model": self.current_model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": self.conversation.system_prompt,
+                            },
+                            {"role": "user", "content": user_message},
+                        ],
+                    }
+                else:
+                    payload = {
+                        "model": self.current_model,
+                        "messages": self.conversation.get_messages(),
+                    }
 
             resp = requests.post(url, headers=headers, json=payload, timeout=120)
             elapsed = time.perf_counter() - start
